@@ -18,7 +18,7 @@ import {
     getPastCharacterChats // <-- 从TopInfoBar学到的，用于获取聊天列表
 } from "../../../../script.js";
 
-const MODULE_NAME = 'st-telegram-connector';
+const MODULE_NAME = 'SillyTavern-Telegram-Connector';
 const DEFAULT_SETTINGS = {
     bridgeUrl: 'ws://127.0.0.1:2333',
 };

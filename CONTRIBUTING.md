@@ -43,8 +43,8 @@
 
 1. 克隆仓库：
    ```bash
-   git clone https://github.com/qiqi20020612/st-telegram-connector.git
-   cd st-telegram-connector
+   git clone https://github.com/qiqi20020612/SillyTavern-Telegram-Connector.git
+   cd SillyTavern-Telegram-Connector
    ```
 
 2. 设置服务器：
@@ -65,7 +65,7 @@
 
 5. 将扩展安装到 SillyTavern：
    - 在 SillyTavern 中，使用本地文件路径安装扩展
-   - 或者使用 URL 安装：`http://localhost:你的端口/st-telegram-connector`
+   - 或者使用 URL 安装：`http://localhost:你的端口/SillyTavern-Telegram-Connector`
 
 ## 代码风格
 
