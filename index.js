@@ -12,7 +12,7 @@ const {
 // 警告：这种直接导入方式可能在SillyTavern更新后失效，但目前是最高效的方式
 import { generateQuietPrompt } from "../../../../script.js";
 
-const MODULE_NAME = 'telegram-connector';
+const MODULE_NAME = 'st-telegram-connector';
 const DEFAULT_SETTINGS = {
     bridgeUrl: 'ws://127.0.0.1:2333',
 };
@@ -108,7 +108,7 @@ function disconnect() {
 // 扩展加载时执行的函数
 jQuery(async () => {
     // 加载设置UI
-    const settingsHtml = await $.get(`/extensions/third-party/${MODULE_NAME}/settings.html`);
+    const settingsHtml = await $.get(`/scripts/extensions/third-party/${MODULE_NAME}/settings.html`);
     $('#extensions_settings').append(settingsHtml);
 
     const settings = getSettings();
