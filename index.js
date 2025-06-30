@@ -1,63 +1,127 @@
-// The main script for the extension
-// The following are examples of some basic extension functionality
+// index.js
 
-//You'll likely need to import extension_settings, getContext, and loadExtensionSettings from extensions.js
-import { extension_settings, getContext, loadExtensionSettings } from "../../../extensions.js";
+// 导入SillyTavern的上下文和核心函数
+const {
+    getContext,
+    getApiUrl, // 虽然此项目不用API，但这是个好习惯
+    extensionSettings,
+    saveSettingsDebounced,
+} = SillyTavern.getContext();
 
-//You'll likely need to import some other functions from the main script
-import { saveSettingsDebounced } from "../../../../script.js";
+// 我们需要从更深层级导入生成函数
+// 警告：这种直接导入方式可能在SillyTavern更新后失效，但目前是最高效的方式
+import { generateQuietPrompt } from "../../../../script.js";
 
-// Keep track of where your extension is located, name should match repo name
-const extensionName = "st-extension-example";
-const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
-const extensionSettings = extension_settings[extensionName];
-const defaultSettings = {};
+const MODULE_NAME = 'telegram-connector';
+const DEFAULT_SETTINGS = {
+    bridgeUrl: 'ws://127.0.0.1:2333',
+};
 
+let ws = null; // WebSocket实例
 
- 
-// Loads the extension settings if they exist, otherwise initializes them to the defaults.
-async function loadSettings() {
-  //Create the settings if they don't exist
-  extension_settings[extensionName] = extension_settings[extensionName] || {};
-  if (Object.keys(extension_settings[extensionName]).length === 0) {
-    Object.assign(extension_settings[extensionName], defaultSettings);
-  }
-
-  // Updating settings in the UI
-  $("#example_setting").prop("checked", extension_settings[extensionName].example_setting).trigger("input");
+// 获取或初始化设置
+function getSettings() {
+    if (!extensionSettings[MODULE_NAME]) {
+        extensionSettings[MODULE_NAME] = { ...DEFAULT_SETTINGS };
+    }
+    return extensionSettings[MODULE_NAME];
 }
 
-// This function is called when the extension settings are changed in the UI
-function onExampleInput(event) {
-  const value = Boolean($(event.target).prop("checked"));
-  extension_settings[extensionName].example_setting = value;
-  saveSettingsDebounced();
+// 更新连接状态显示
+function updateStatus(message, color) {
+    const statusEl = document.getElementById('telegram_connection_status');
+    if (statusEl) {
+        statusEl.textContent = `Status: ${message}`;
+        statusEl.style.color = color;
+    }
 }
 
-// This function is called when the button is clicked
-function onButtonClick() {
-  // You can do whatever you want here
-  // Let's make a popup appear with the checked setting
-  toastr.info(
-    `The checkbox is ${extension_settings[extensionName].example_setting ? "checked" : "not checked"}`,
-    "A popup appeared because you clicked the button!"
-  );
+// 连接到WebSocket服务器
+function connect() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        console.log('Telegram Bridge: Already connected.');
+        return;
+    }
+
+    const settings = getSettings();
+    if (!settings.bridgeUrl) {
+        updateStatus('Bridge URL is not set!', 'red');
+        return;
+    }
+
+    updateStatus('Connecting...', 'orange');
+    console.log(`Telegram Bridge: Connecting to ${settings.bridgeUrl}...`);
+    
+    ws = new WebSocket(settings.bridgeUrl);
+
+    ws.onopen = () => {
+        console.log('Telegram Bridge: Connection successful!');
+        updateStatus('Connected', 'green');
+    };
+
+    ws.onmessage = async (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            console.log('Telegram Bridge: Received message from bridge server.', data);
+
+            if (data.type === 'user_message') {
+                // 核心：收到用户消息，开始生成回复
+                // generateQuietPrompt 会在后台运行，不会在UI上显示"..."
+                // 它会使用当前所有的上下文、角色、格式等设置
+                const aiReply = await generateQuietPrompt(data.text, false);
+
+                // 将回复发送回桥接服务器
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    const payload = JSON.stringify({
+                        type: 'ai_reply',
+                        chatId: data.chatId,
+                        text: aiReply,
+                    });
+                    ws.send(payload);
+                    console.log('Telegram Bridge: Sent AI reply back to bridge server.');
+                }
+            }
+        } catch (error) {
+            console.error('Telegram Bridge: Error processing message or generating reply:', error);
+        }
+    };
+
+    ws.onclose = () => {
+        console.log('Telegram Bridge: Connection closed.');
+        updateStatus('Disconnected', 'red');
+        ws = null;
+    };
+
+    ws.onerror = (error) => {
+        console.error('Telegram Bridge: WebSocket error:', error);
+        updateStatus('Connection Error', 'red');
+        ws = null;
+    };
 }
 
-// This function is called when the extension is loaded
+function disconnect() {
+    if (ws) {
+        ws.close();
+    }
+}
+
+// 扩展加载时执行的函数
 jQuery(async () => {
-  // This is an example of loading HTML from a file
-  const settingsHtml = await $.get(`${extensionFolderPath}/example.html`);
+    // 加载设置UI
+    const settingsHtml = await $.get(`/extensions/third-party/${MODULE_NAME}/settings.html`);
+    $('#extensions_settings').append(settingsHtml);
 
-  // Append settingsHtml to extensions_settings
-  // extension_settings and extensions_settings2 are the left and right columns of the settings menu
-  // Left should be extensions that deal with system functions and right should be visual/UI related 
-  $("#extensions_settings").append(settingsHtml);
+    const settings = getSettings();
+    $('#telegram_bridge_url').val(settings.bridgeUrl);
 
-  // These are examples of listening for events
-  $("#my_button").on("click", onButtonClick);
-  $("#example_setting").on("input", onExampleInput);
+    // 绑定事件
+    $('#telegram_bridge_url').on('input', () => {
+        settings.bridgeUrl = $('#telegram_bridge_url').val();
+        saveSettingsDebounced();
+    });
+    
+    $('#telegram_connect_button').on('click', connect);
+    $('#telegram_disconnect_button').on('click', disconnect);
 
-  // Load settings when starting things up (if you have any)
-  loadSettings();
+    console.log('Telegram Connector extension loaded.');
 });

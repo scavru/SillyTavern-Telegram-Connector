@@ -1,11 +1,11 @@
 {
-    "display_name": "Name Displayed in SillyTavern",
+    "display_name": "Telegram Connector",
     "loading_order": 9,
     "requires": [],
     "optional": [],
     "js": "index.js",
     "css": "style.css",
-    "author": "yourNameHere",
+    "author": "ZMou",
     "version": "1.0.0",
-    "homePage": "yourUrlHere"
+    "homePage": "https://zmoutech.cn"
 }
