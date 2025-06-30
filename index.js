@@ -105,14 +105,13 @@ function connect() {
                         replyText = `SillyTavern Telegram Bridge 命令：\n\n`;
                         replyText += `聊天管理\n`;
                         replyText += `  /new - 开始与当前角色的新聊天。\n`;
-                        replyText += `  /listchats - 列出当前角色的所有已保存的聊天记录（带可点击链接）。\n`;
+                        replyText += `  /listchats - 列出当前角色的所有已保存的聊天记录。\n`;
                         replyText += `  /switchchat <chat_name> - 加载特定的聊天记录。\n\n`;
                         replyText += `角色管理\n`;
-                        replyText += `  /listchars - 列出所有可用角色（带可点击链接）。\n`;
+                        replyText += `  /listchars - 列出所有可用角色。\n`;
                         replyText += `  /switchchar <char_name> - 切换到不同的角色。\n\n`;
                         replyText += `帮助\n`;
-                        replyText += `  /help - 显示此帮助信息。\n\n`;
-                        replyText += `提示：使用 /listchars 和 /listchats 命令时，您可以直接点击列表中的角色或聊天名称来快速切换。`;
+                        replyText += `  /help - 显示此帮助信息。`;
                         break;
                     // --- 现有命令保持不变 ---
                     case 'new':
@@ -122,18 +121,7 @@ function connect() {
 
                     case 'listchars': {
                         const characters = context.characters.slice(1);
-                        replyText = '可用角色列表：\n\n';
-                        // 使用Telegram格式的命令链接，便于点击
-                        replyText += characters.map(c => {
-                            // 对角色名称进行URI编码以处理特殊字符
-                            const encodedName = encodeURIComponent(c.name);
-                            // 如果有机器人用户名就使用链接格式，否则使用普通格式
-                            if (data.botUsername) {
-                                return `- <a href="https://t.me/${data.botUsername}?start=switchchar_${encodedName}">${c.name}</a>`;
-                            } else {
-                                return `- ${c.name} (使用命令: /switchchar ${c.name})`;
-                            }
-                        }).join('\n');
+                        replyText = '可用角色列表：\n\n' + characters.map(c => `/switchchar ${c.name}`).join('\n');
                         break;
                     }
 
@@ -160,18 +148,7 @@ function connect() {
                         }
                         const chatFiles = await getPastCharacterChats(context.characterId);
                         if (chatFiles.length > 0) {
-                            replyText = '当前角色的聊天记录：\n\n';
-                            // 使用Telegram格式的命令链接，便于点击
-                            replyText += chatFiles.map(f => {
-                                const chatName = f.file_name.replace('.jsonl', '');
-                                const encodedName = encodeURIComponent(chatName);
-                                // 如果有机器人用户名就使用链接格式，否则使用普通格式
-                                if (data.botUsername) {
-                                    return `- <a href="https://t.me/${data.botUsername}?start=switchchat_${encodedName}">${chatName}</a>`;
-                                } else {
-                                    return `- ${chatName} (使用命令: /switchchat ${chatName})`;
-                                }
-                            }).join('\n');
+                            replyText = '当前角色的聊天记录：\n\n' + chatFiles.map(f => `/switchchat ${f.file_name.replace('.jsonl', '')}`).join('\n');
                         } else {
                             replyText = '当前角色没有任何聊天记录。';
                         }
