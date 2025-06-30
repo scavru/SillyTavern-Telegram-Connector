@@ -1,5 +1,5 @@
 {
-  "name": "SillyTavern-Telegram-Connector-Server",
+  "name": "st-telegram-connector-server",
   "version": "1.0.0",
   "description": "SillyTavern Telegram Connector 的服务器端组件",
   "main": "server.js",
