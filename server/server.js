@@ -4,6 +4,65 @@ const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
 
+// 重启保护 - 防止循环重启
+const RESTART_PROTECTION_FILE = path.join(__dirname, '.restart_protection');
+const MAX_RESTARTS = 3;
+const RESTART_WINDOW_MS = 60000; // 1分钟
+
+// 检查是否可能处于循环重启状态
+function checkRestartProtection() {
+    try {
+        if (fs.existsSync(RESTART_PROTECTION_FILE)) {
+            const data = JSON.parse(fs.readFileSync(RESTART_PROTECTION_FILE, 'utf8'));
+            const now = Date.now();
+
+            // 清理过期的重启记录
+            data.restarts = data.restarts.filter(time => now - time < RESTART_WINDOW_MS);
+
+            // 添加当前重启时间
+            data.restarts.push(now);
+
+            // 如果在时间窗口内重启次数过多，则退出
+            if (data.restarts.length > MAX_RESTARTS) {
+                console.error(`检测到可能的循环重启！在${RESTART_WINDOW_MS / 1000}秒内重启了${data.restarts.length}次。`);
+                console.error('为防止资源耗尽，服务器将退出。请手动检查并修复问题后再启动。');
+
+                // 如果有通知chatId，尝试发送错误消息
+                if (process.env.RESTART_NOTIFY_CHATID) {
+                    const chatId = parseInt(process.env.RESTART_NOTIFY_CHATID);
+                    if (!isNaN(chatId)) {
+                        // 创建临时bot发送错误消息
+                        try {
+                            const tempBot = new TelegramBot(require('./config').telegramToken, { polling: false });
+                            tempBot.sendMessage(chatId, '检测到循环重启！服务器已停止以防止资源耗尽。请手动检查问题。')
+                                .finally(() => process.exit(1));
+                        } catch (e) {
+                            process.exit(1);
+                        }
+                        return; // 等待消息发送后退出
+                    }
+                }
+
+                process.exit(1);
+            }
+
+            // 保存更新后的重启记录
+            fs.writeFileSync(RESTART_PROTECTION_FILE, JSON.stringify(data));
+        } else {
+            // 创建新的重启保护文件
+            fs.writeFileSync(RESTART_PROTECTION_FILE, JSON.stringify({
+                restarts: [Date.now()]
+            }));
+        }
+    } catch (error) {
+        console.error('重启保护检查失败:', error);
+        // 出错时继续执行，不要阻止服务器启动
+    }
+}
+
+// 启动时检查重启保护
+checkRestartProtection();
+
 // 检查配置文件是否存在
 const configPath = path.join(__dirname, './config.js');
 if (!fs.existsSync(configPath)) {
@@ -130,16 +189,22 @@ function restartServer(chatId) {
 
                 console.log(`重启服务器: ${serverPath}`);
 
-                // 将chatId作为环境变量传递给新进程
-                const env = Object.assign({}, process.env);
+                // 创建一个干净的环境变量对象，只包含必要的系统环境变量
+                const cleanEnv = {
+                    PATH: process.env.PATH,
+                    NODE_PATH: process.env.NODE_PATH,
+                    // 可以根据需要添加其他必要的系统环境变量
+                };
+
+                // 只添加chatId作为通知用途
                 if (chatId) {
-                    env.RESTART_NOTIFY_CHATID = chatId.toString();
+                    cleanEnv.RESTART_NOTIFY_CHATID = chatId.toString();
                 }
 
                 const child = spawn(process.execPath, [serverPath], {
                     detached: true,
                     stdio: 'inherit',
-                    env: env
+                    env: cleanEnv
                 });
 
                 child.unref();
@@ -156,6 +221,16 @@ function exitServer(chatId) {
     // 如果有chatId，先发送一条消息
     if (chatId) {
         bot.sendMessage(chatId, '正在关闭服务器端组件...');
+    }
+
+    // 清理重启保护文件
+    try {
+        if (fs.existsSync(RESTART_PROTECTION_FILE)) {
+            fs.unlinkSync(RESTART_PROTECTION_FILE);
+            console.log('已清理重启保护文件');
+        }
+    } catch (error) {
+        console.error('清理重启保护文件失败:', error);
     }
 
     // 关闭WebSocket服务器
@@ -229,7 +304,12 @@ if (process.env.RESTART_NOTIFY_CHATID) {
         // 等待一小段时间确保bot已经准备好
         setTimeout(() => {
             bot.sendMessage(chatId, '服务器端组件已成功重启并准备就绪')
-                .catch(err => console.error('发送重启通知失败:', err));
+                .catch(err => console.error('发送重启通知失败:', err))
+                .finally(() => {
+                    // 清除环境变量，防止重复触发重启
+                    delete process.env.RESTART_NOTIFY_CHATID;
+                    console.log('已清除重启通知环境变量，防止循环重启');
+                });
         }, 2000);
     }
 }
