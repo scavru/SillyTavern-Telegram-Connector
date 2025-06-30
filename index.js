@@ -304,16 +304,4 @@ jQuery(async () => {
     }
 
     console.log('Telegram Connector 扩展已加载。');
-
-    // 为可折叠菜单添加点击逻辑
-    $('#telegram-connector-settings .sub-title').on('click', function () {
-        // 找到与标题栏相邻的 .settings-content
-        const content = $(this).siblings('.settings-content');
-
-        // 使用带动画的滑入/滑出效果来切换显示状态
-        content.slideToggle(200);
-
-        // 切换标题栏的 'closed' 类，以便CSS可以改变箭头的方向
-        $(this).toggleClass('closed');
-    });
 });
