@@ -171,11 +171,6 @@ function reloadServer(chatId) {
 function restartServer(chatId) {
     console.log('重启服务器端组件...');
 
-    // 如果有chatId，先发送一条消息
-    if (chatId) {
-        bot.sendMessage(chatId, '正在重启服务器端组件，请稍候...');
-    }
-
     // 关闭当前的WebSocket连接
     if (wss) {
         wss.close(() => {
@@ -217,11 +212,6 @@ function restartServer(chatId) {
 // 退出服务器函数
 function exitServer(chatId) {
     console.log('正在关闭服务器...');
-
-    // 如果有chatId，先发送一条消息
-    if (chatId) {
-        bot.sendMessage(chatId, '正在关闭服务器端组件...');
-    }
 
     // 清理重启保护文件
     try {
@@ -331,17 +321,46 @@ bot.on('message', (msg) => {
         if (command === 'reload' || command === 'restart' || command === 'exit') {
             console.log(`从Telegram用户 ${chatId} 收到系统命令: "${text}"`);
 
-            // 如果是reload命令且ST连接正常，需要通知ST刷新页面
-            if (command === 'reload' && sillyTavernClient && sillyTavernClient.readyState === WebSocket.OPEN) {
-                sillyTavernClient.send(JSON.stringify({
-                    type: 'system_command',
-                    command: 'reload_ui_only',
-                    chatId: chatId
-                }));
+            // 先发送响应，然后再处理命令
+            let responseMessage = '';
+            switch (command) {
+                case 'reload':
+                    responseMessage = '正在重载服务器端组件...';
+                    break;
+                case 'restart':
+                    responseMessage = '正在重启服务器端组件...';
+                    break;
+                case 'exit':
+                    responseMessage = '正在关闭服务器端组件...';
+                    break;
             }
 
-            // 直接在服务器端执行系统命令
-            handleSystemCommand(command, chatId);
+            // 发送响应并等待发送完成后再执行命令
+            bot.sendMessage(chatId, responseMessage)
+                .then(() => {
+                    console.log(`已向用户 ${chatId} 发送响应: "${responseMessage}"`);
+
+                    // 如果是reload命令且ST连接正常，需要通知ST刷新页面
+                    if (command === 'reload' && sillyTavernClient && sillyTavernClient.readyState === WebSocket.OPEN) {
+                        sillyTavernClient.send(JSON.stringify({
+                            type: 'system_command',
+                            command: 'reload_ui_only',
+                            chatId: chatId
+                        }));
+                    }
+
+                    // 延迟一小段时间再执行命令，确保消息已发送
+                    setTimeout(() => {
+                        // 直接在服务器端执行系统命令
+                        handleSystemCommand(command, chatId);
+                    }, 500);
+                })
+                .catch(error => {
+                    console.error('发送响应消息失败:', error);
+                    // 即使发送失败也执行命令
+                    handleSystemCommand(command, chatId);
+                });
+
             return; // 不再继续处理
         }
     }
