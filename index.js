@@ -14,7 +14,8 @@ import {
     generateQuietPrompt,
     eventSource,
     event_types,
-    saveChatDebounced
+    saveChatDebounced,
+    getPastCharacterChats // <-- 从TopInfoBar学到的，用于获取聊天列表
 } from "../../../../script.js";
 
 const MODULE_NAME = 'st-telegram-connector';
@@ -67,56 +68,120 @@ function connect() {
     ws.onmessage = async (event) => {
         try {
             const data = JSON.parse(event.data);
-            console.log('Telegram Bridge: Received message from bridge server.', data);
+            const context = SillyTavern.getContext();
 
             if (data.type === 'user_message') {
-                const context = SillyTavern.getContext();
+                // ... (普通聊天逻辑，保持不变) ...
+                console.log('Telegram Bridge: Received user message.', data);
 
-                // --- 步骤 1: 处理用户消息 ---
-                const userMessage = {
-                    name: 'You',
-                    is_user: true,
-                    is_name: true,
-                    send_date: Date.now(),
-                    mes: data.text,
-                };
+                const userMessage = { name: 'You', is_user: true, is_name: true, send_date: Date.now(), mes: data.text };
                 context.chat.push(userMessage);
                 eventSource.emit(event_types.CHAT_CHANGED, context.chat);
-                console.log('Telegram Bridge: Added user message to chat. Generating reply...');
+                console.log('Telegram Bridge: Added user message. Generating reply...');
 
-                // --- 步骤 2: 生成AI回复 ---
                 const aiReplyText = await generateQuietPrompt(null, false);
 
-                // --- 步骤 3: 处理AI回复 ---
                 const characterName = context.characters[context.characterId].name;
-                const aiMessage = {
-                    name: characterName,
-                    is_user: false,
-                    is_name: true,
-                    send_date: Date.now(),
-                    mes: aiReplyText,
-                };
+                const aiMessage = { name: characterName, is_user: false, is_name: true, send_date: Date.now(), mes: aiReplyText };
                 context.chat.push(aiMessage);
                 eventSource.emit(event_types.CHAT_CHANGED, context.chat);
-                console.log(`Telegram Bridge: Added AI reply from "${characterName}" to chat.`);
+                console.log(`Telegram Bridge: Added AI reply for "${characterName}".`);
 
-                // --- 步骤 4: 将AI回复发送到Telegram ---
                 if (ws && ws.readyState === WebSocket.OPEN) {
-                    const payload = JSON.stringify({
-                        type: 'ai_reply',
-                        chatId: data.chatId,
-                        text: aiReplyText,
-                    });
-                    ws.send(payload);
-                    console.log('Telegram Bridge: Sent AI reply to Telegram.');
+                    ws.send(JSON.stringify({ type: 'ai_reply', chatId: data.chatId, text: aiReplyText }));
+                }
+                saveChatDebounced();
+                return;
+            }
+
+            if (data.type === 'command_request') {
+                console.log('Telegram Bridge: Processing command.', data);
+                let replyText = `Unknown command: /${data.command}. Use /help to see all commands.`; // 更新了未知命令的提示
+                const { executeSlashCommandsWithOptions, openCharacterChat } = context;
+
+                switch (data.command) {
+                    // --- 新增的 /help 命令 ---
+                    case 'help':
+                        replyText = `SillyTavern Telegram Bridge Commands:\n\n`;
+                        replyText += `💬 *Chat Management*\n`;
+                        replyText += `  \`/new\` - Start a new chat with the current character.\n`;
+                        replyText += `  \`/listchats\` - List all saved chats for the current character.\n`;
+                        replyText += `  \`/switchchat <chat_name>\` - Load a specific chat history.\n\n`;
+                        replyText += `🎭 *Character Management*\n`;
+                        replyText += `  \`/listchars\` - List all available characters.\n`;
+                        replyText += `  \`/switchchar <char_name>\` - Switch to a different character.\n\n`;
+                        replyText += `ℹ️ *Help*\n`;
+                        replyText += `  \`/help\` - Show this help message.`;
+                        break;
+                    // --- 现有命令保持不变 ---
+                    case 'new':
+                        await executeSlashCommandsWithOptions('/newchat');
+                        replyText = '新的聊天已经开始。';
+                        break;
+
+                    case 'listchars': {
+                        const characters = context.characters.slice(1);
+                        replyText = '可用角色列表:\n\n' + characters.map(c => `- ${c.name}`).join('\n');
+                        break;
+                    }
+
+                    case 'switchchar': {
+                        if (data.args.length === 0) {
+                            replyText = '请提供角色名称。用法: /switchchar <角色名称>';
+                            break;
+                        }
+                        const targetName = data.args.join(' ');
+                        const result = await executeSlashCommandsWithOptions(`/char "${targetName}"`);
+
+                        if (result && typeof result === 'string') {
+                            replyText = result;
+                        } else {
+                            replyText = `尝试切换到角色 "${targetName}"，但未收到明确的成功信息。`;
+                        }
+                        break;
+                    }
+
+                    case 'listchats': {
+                        if (context.characterId === undefined) {
+                            replyText = '请先选择一个角色。';
+                            break;
+                        }
+                        const chatFiles = await getPastCharacterChats(context.characterId);
+                        if (chatFiles.length > 0) {
+                            replyText = '当前角色的聊天记录:\n\n' + chatFiles.map(f => `- ${f.file_name.replace('.jsonl', '')}`).join('\n');
+                        } else {
+                            replyText = '当前角色没有任何聊天记录。';
+                        }
+                        break;
+                    }
+
+                    case 'switchchat': {
+                        if (data.args.length === 0) {
+                            replyText = '请提供聊天记录名称。用法: /switchchat <聊天记录名称>';
+                            break;
+                        }
+                        const targetChatFile = `${data.args.join(' ')}`;
+                        try {
+                            await openCharacterChat(targetChatFile);
+                            replyText = `已加载聊天记录: ${data.args.join(' ')}`;
+                        } catch (err) {
+                            console.error(err);
+                            replyText = `加载聊天记录 "${data.args.join(' ')}" 失败。请确认名称完全正确。`;
+                        }
+                        break;
+                    }
                 }
 
-                // --- 步骤 5: 保存聊天记录 (这是新增的关键步骤！) ---
-                saveChatDebounced();
-                console.log('Telegram Bridge: Chat save triggered.');
+                // 将命令执行结果回复给用户
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'ai_reply', chatId: data.chatId, text: replyText }));
+                }
             }
         } catch (error) {
-            console.error('Telegram Bridge: Error processing message or generating reply:', error);
+            console.error('Telegram Bridge: Error processing message or command:', error);
+            if (data && data.chatId && ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'ai_reply', chatId: data.chatId, text: '处理您的请求时发生了一个内部错误。' }));
+            }
         }
     };
 
