@@ -251,31 +251,12 @@ function exitServer(chatId) {
                     bot.stopPolling()
                         .then(() => {
                             console.log('Telegram Bot已停止');
-
-                            // 尝试发送最终通知
-                            if (chatId) {
-                                bot.sendMessage(chatId, '服务器端组件已成功关闭')
-                                    .then(() => finalExit())
-                                    .catch(err => {
-                                        console.error('发送最终通知失败:', err);
-                                        finalExit();
-                                    });
-                            } else {
-                                finalExit();
-                            }
+                            // 不再发送最终通知，直接退出
+                            finalExit();
                         })
                         .catch(err => {
                             console.error('停止Telegram Bot时出错:', err);
-                            if (chatId) {
-                                try {
-                                    bot.sendMessage(chatId, '服务器关闭过程中出现错误，正在强制退出')
-                                        .finally(() => finalExit());
-                                } catch (e) {
-                                    finalExit();
-                                }
-                            } else {
-                                finalExit();
-                            }
+                            finalExit();
                         });
                 } catch (botError) {
                     console.error('调用bot.stopPolling时出错:', botError);
@@ -289,16 +270,8 @@ function exitServer(chatId) {
             try {
                 bot.stopPolling()
                     .finally(() => {
-                        if (chatId) {
-                            try {
-                                bot.sendMessage(chatId, '服务器关闭过程中出现错误，正在强制退出')
-                                    .finally(() => finalExit());
-                            } catch (e) {
-                                finalExit();
-                            }
-                        } else {
-                            finalExit();
-                        }
+                        // 不再发送错误通知，直接退出
+                        finalExit();
                     });
             } catch (e) {
                 finalExit();
@@ -310,12 +283,8 @@ function exitServer(chatId) {
             bot.stopPolling()
                 .then(() => {
                     console.log('Telegram Bot已停止');
-                    if (chatId) {
-                        bot.sendMessage(chatId, '服务器端组件已成功关闭')
-                            .finally(() => finalExit());
-                    } else {
-                        finalExit();
-                    }
+                    // 不再发送最终通知，直接退出
+                    finalExit();
                 })
                 .catch(err => {
                     console.error('停止Telegram Bot时出错:', err);
