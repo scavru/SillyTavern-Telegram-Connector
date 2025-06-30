@@ -10,11 +10,11 @@ const {
 
 // 我们需要从更深层级导入生成函数
 // 警告：这种直接导入方式可能在SillyTavern更新后失效，但目前是最高效的方式
-import { generateQuietPrompt } from "../../../../script.js";
+import { generateQuietPrompt, updateChat, getReply, getWho, saveChatDebounced } from "../../../../script.js";
 
 const MODULE_NAME = 'st-telegram-connector';
 const DEFAULT_SETTINGS = {
-    bridgeUrl: 'ws://127.0.0.1:2333',
+    bridgeUrl: 'ws://192.168.31.194:2333',
 };
 
 let ws = null; // WebSocket实例
@@ -51,7 +51,7 @@ function connect() {
 
     updateStatus('Connecting...', 'orange');
     console.log(`Telegram Bridge: Connecting to ${settings.bridgeUrl}...`);
-    
+
     ws = new WebSocket(settings.bridgeUrl);
 
     ws.onopen = () => {
@@ -65,12 +65,32 @@ function connect() {
             console.log('Telegram Bridge: Received message from bridge server.', data);
 
             if (data.type === 'user_message') {
-                // 核心：收到用户消息，开始生成回复
-                // generateQuietPrompt 会在后台运行，不会在UI上显示"..."
-                // 它会使用当前所有的上下文、角色、格式等设置
-                const aiReply = await generateQuietPrompt(data.text, false);
+                const context = getContext();
 
-                // 将回复发送回桥接服务器
+                // 1. 创建用户消息对象
+                const userMessage = {
+                    name: getWho('user'), // 获取当前用户名
+                    is_user: true,
+                    is_name: true,
+                    send_date: Date.now(),
+                    mes: data.text,
+                };
+
+                // 2. 将用户消息添加到聊天记录
+                context.chat.push(userMessage);
+
+                // 3. 更新UI和内部状态（非常重要！）
+                // 这一步会把你的消息显示在SillyTavern界面上，并让后续的生成函数知道它的存在
+                updateChat(context.chat);
+
+                console.log('Telegram Bridge: Added user message to chat. Now generating reply...');
+
+                // 4. 触发AI生成回复
+                // 我们调用 getReply，但不提供新的 prompt，它会自动使用聊天记录的最后一部分作为上下文。
+                // 第三个参数 `true` 表示 "quiet" 模式，不会在UI上显示 "..." 动画。
+                const aiReply = await getReply(null, false, true);
+
+                // 5. 将回复发送回桥接服务器
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     const payload = JSON.stringify({
                         type: 'ai_reply',
@@ -79,6 +99,9 @@ function connect() {
                     });
                     ws.send(payload);
                     console.log('Telegram Bridge: Sent AI reply back to bridge server.');
+
+                    // 6. (推荐) 保存聊天记录
+                    saveChatDebounced();
                 }
             }
         } catch (error) {
@@ -107,21 +130,31 @@ function disconnect() {
 
 // 扩展加载时执行的函数
 jQuery(async () => {
-    // 加载设置UI
-    const settingsHtml = await $.get(`/scripts/extensions/third-party/${MODULE_NAME}/settings.html`);
-    $('#extensions_settings').append(settingsHtml);
+    // 调试信息，确认代码块被执行
+    console.log('Attempting to load Telegram Connector settings UI...');
 
-    const settings = getSettings();
-    $('#telegram_bridge_url').val(settings.bridgeUrl);
+    // 加载设置UI (已修正URL路径)
+    try {
+        const settingsHtml = await $.get(`/scripts/extensions/third-party/${MODULE_NAME}/settings.html`);
+        $('#extensions_settings').append(settingsHtml);
+        console.log('Telegram Connector settings UI should now be appended.');
 
-    // 绑定事件
-    $('#telegram_bridge_url').on('input', () => {
-        settings.bridgeUrl = $('#telegram_bridge_url').val();
-        saveSettingsDebounced();
-    });
-    
-    $('#telegram_connect_button').on('click', connect);
-    $('#telegram_disconnect_button').on('click', disconnect);
+        const settings = getSettings();
+        $('#telegram_bridge_url').val(settings.bridgeUrl);
+
+        // 绑定事件
+        $('#telegram_bridge_url').on('input', () => {
+            settings.bridgeUrl = $('#telegram_bridge_url').val();
+            saveSettingsDebounced();
+        });
+
+        $('#telegram_connect_button').on('click', connect);
+        $('#telegram_disconnect_button').on('click', disconnect);
+
+    } catch (error) {
+        console.error('Failed to load Telegram Connector settings HTML.', error);
+        // 在这里可以添加一些用户友好的错误提示到UI上
+    }
 
     console.log('Telegram Connector extension loaded.');
 });
