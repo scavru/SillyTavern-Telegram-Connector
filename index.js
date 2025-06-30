@@ -21,6 +21,7 @@ import {
 const MODULE_NAME = 'SillyTavern-Telegram-Connector';
 const DEFAULT_SETTINGS = {
     bridgeUrl: 'ws://127.0.0.1:2333',
+    autoConnect: true, // 添加自动连接设置，默认为开启
 };
 
 let ws = null; // WebSocket实例
@@ -288,6 +289,7 @@ jQuery(async () => {
 
         const settings = getSettings();
         $('#telegram_bridge_url').val(settings.bridgeUrl);
+        $('#telegram_auto_connect').prop('checked', settings.autoConnect);
 
         // 绑定事件
         $('#telegram_bridge_url').on('input', () => {
@@ -295,8 +297,19 @@ jQuery(async () => {
             saveSettingsDebounced();
         });
 
+        $('#telegram_auto_connect').on('change', function () {
+            settings.autoConnect = $(this).prop('checked');
+            saveSettingsDebounced();
+        });
+
         $('#telegram_connect_button').on('click', connect);
         $('#telegram_disconnect_button').on('click', disconnect);
+
+        // 如果启用了自动连接，则自动连接
+        if (settings.autoConnect) {
+            console.log('Telegram Bridge: 自动连接已启用，正在连接...');
+            connect();
+        }
 
     } catch (error) {
         console.error('加载 Telegram Connector 设置 HTML 失败。', error);
