@@ -19,6 +19,15 @@ if (token === 'TOKEN') {
 const bot = new TelegramBot(token, { polling: true });
 console.log('Telegram Bot已启动...');
 
+// 获取机器人信息
+let botInfo = null;
+bot.getMe().then(info => {
+    botInfo = info;
+    console.log(`机器人信息已获取: @${botInfo.username}`);
+}).catch(error => {
+    console.error('获取机器人信息失败:', error);
+});
+
 // 初始化WebSocket服务器
 const wss = new WebSocket.Server({ port: wssPort });
 console.log(`WebSocket服务器正在监听端口 ${wssPort}...`);
@@ -35,7 +44,8 @@ wss.on('connection', ws => {
             const data = JSON.parse(message);
             if (data.type === 'ai_reply' && data.chatId) {
                 console.log(`收到AI回复，准备发送至Telegram用户 ${data.chatId}`);
-                bot.sendMessage(data.chatId, data.text);
+                // 使用parse_mode: 'HTML'以支持HTML格式的超链接
+                bot.sendMessage(data.chatId, data.text, { parse_mode: 'HTML' });
             }
         } catch (error) {
             console.error('处理SillyTavern消息时出错:', error);
@@ -69,12 +79,43 @@ bot.on('message', (msg) => {
             const command = parts[0].toLowerCase();
             const args = parts.slice(1);
 
-            payload = JSON.stringify({
-                type: 'command_request',
-                chatId: chatId,
-                command: command,
-                args: args
-            });
+            // 处理特殊的start命令，用于超链接点击
+            if (command === 'start' && args.length > 0 && args[0].includes('_')) {
+                const [actualCommand, ...paramParts] = args[0].split('_');
+                const param = paramParts.join('_');
+                
+                if (actualCommand === 'switchchar' || actualCommand === 'switchchat') {
+                    // 解码URI编码的参数
+                    const decodedParam = decodeURIComponent(param);
+                    console.log(`处理链接点击命令: /${actualCommand} ${decodedParam}`);
+                    
+                    payload = JSON.stringify({
+                        type: 'command_request',
+                        chatId: chatId,
+                        command: actualCommand,
+                        args: [decodedParam],
+                        botUsername: botInfo ? botInfo.username : null
+                    });
+                } else {
+                    // 处理普通的start命令
+                    payload = JSON.stringify({
+                        type: 'command_request',
+                        chatId: chatId,
+                        command: command,
+                        args: args,
+                        botUsername: botInfo ? botInfo.username : null
+                    });
+                }
+            } else {
+                // 处理普通命令
+                payload = JSON.stringify({
+                    type: 'command_request',
+                    chatId: chatId,
+                    command: command,
+                    args: args,
+                    botUsername: botInfo ? botInfo.username : null
+                });
+            }
         } else {
             // --- 这是普通消息处理逻辑 (保持不变) ---
             console.log(`从Telegram用户 ${chatId} 收到消息: "${text}"`);
