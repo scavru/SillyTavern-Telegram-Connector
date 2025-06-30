@@ -10,7 +10,7 @@ const {
 
 // 我们需要从更深层级导入生成函数
 // 警告：这种直接导入方式可能在SillyTavern更新后失效，但目前是最高效的方式
-import { generateQuietPrompt, updateChat, getReply, getWho, saveChatDebounced } from "../../../../script.js";
+import { generateQuietPrompt } from "../../../../script.js";
 
 const MODULE_NAME = 'st-telegram-connector';
 const DEFAULT_SETTINGS = {
@@ -65,11 +65,12 @@ function connect() {
             console.log('Telegram Bridge: Received message from bridge server.', data);
 
             if (data.type === 'user_message') {
-                const context = getContext();
+                // 获取官方推荐的SillyTavern上下文
+                const context = SillyTavern.getContext();
 
                 // 1. 创建用户消息对象
                 const userMessage = {
-                    name: getWho('user'), // 获取当前用户名
+                    name: context.getWho('user'), // 通过context获取用户名
                     is_user: true,
                     is_name: true,
                     send_date: Date.now(),
@@ -80,15 +81,16 @@ function connect() {
                 context.chat.push(userMessage);
 
                 // 3. 更新UI和内部状态（非常重要！）
-                // 这一步会把你的消息显示在SillyTavern界面上，并让后续的生成函数知道它的存在
-                updateChat(context.chat);
-
+                // context.updateChat() 是更新聊天记录的官方推荐方式
+                context.updateChat(context.chat);
                 console.log('Telegram Bridge: Added user message to chat. Now generating reply...');
 
                 // 4. 触发AI生成回复
-                // 我们调用 getReply，但不提供新的 prompt，它会自动使用聊天记录的最后一部分作为上下文。
-                // 第三个参数 `true` 表示 "quiet" 模式，不会在UI上显示 "..." 动画。
-                const aiReply = await getReply(null, false, true);
+                // 我们再次使用 generateQuietPrompt。
+                // 关键点：我们传递一个空字符串 "" 或者 null 作为第一个参数。
+                // 当 prompt 为空时，它会默认使用聊天记录的末尾作为上下文来生成回复。
+                // 这就达到了我们想要的效果：基于刚刚添加的用户消息进行回复。
+                const aiReply = await generateQuietPrompt(null, false);
 
                 // 5. 将回复发送回桥接服务器
                 if (ws && ws.readyState === WebSocket.OPEN) {
@@ -101,7 +103,7 @@ function connect() {
                     console.log('Telegram Bridge: Sent AI reply back to bridge server.');
 
                     // 6. (推荐) 保存聊天记录
-                    saveChatDebounced();
+                    context.saveChatDebounced();
                 }
             }
         } catch (error) {
