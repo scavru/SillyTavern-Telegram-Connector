@@ -10,7 +10,12 @@ const {
 
 // 我们需要从更深层级导入生成函数
 // 警告：这种直接导入方式可能在SillyTavern更新后失效，但目前是最高效的方式
-import { generateQuietPrompt } from "../../../../script.js";
+import {
+    generateQuietPrompt,
+    eventSource,
+    event_types,
+    saveChatDebounced
+} from "../../../../script.js";
 
 const MODULE_NAME = 'st-telegram-connector';
 const DEFAULT_SETTINGS = {
@@ -65,46 +70,50 @@ function connect() {
             console.log('Telegram Bridge: Received message from bridge server.', data);
 
             if (data.type === 'user_message') {
-                // 获取官方推荐的SillyTavern上下文
                 const context = SillyTavern.getContext();
 
-                // 1. 创建用户消息对象
+                // --- 步骤 1: 处理用户消息 ---
                 const userMessage = {
-                    name: context.getWho('user'), // 通过context获取用户名
+                    name: 'You',
                     is_user: true,
                     is_name: true,
                     send_date: Date.now(),
                     mes: data.text,
                 };
-
-                // 2. 将用户消息添加到聊天记录
                 context.chat.push(userMessage);
+                eventSource.emit(event_types.CHAT_CHANGED, context.chat);
+                console.log('Telegram Bridge: Added user message to chat. Generating reply...');
 
-                // 3. 更新UI和内部状态（非常重要！）
-                // context.updateChat() 是更新聊天记录的官方推荐方式
-                context.updateChat(context.chat);
-                console.log('Telegram Bridge: Added user message to chat. Now generating reply...');
+                // --- 步骤 2: 生成AI回复 ---
+                const aiReplyText = await generateQuietPrompt(null, false);
 
-                // 4. 触发AI生成回复
-                // 我们再次使用 generateQuietPrompt。
-                // 关键点：我们传递一个空字符串 "" 或者 null 作为第一个参数。
-                // 当 prompt 为空时，它会默认使用聊天记录的末尾作为上下文来生成回复。
-                // 这就达到了我们想要的效果：基于刚刚添加的用户消息进行回复。
-                const aiReply = await generateQuietPrompt(null, false);
+                // --- 步骤 3: 处理AI回复 ---
+                const characterName = context.characters[context.characterId].name;
+                const aiMessage = {
+                    name: characterName,
+                    is_user: false,
+                    is_name: true,
+                    send_date: Date.now(),
+                    mes: aiReplyText,
+                };
+                context.chat.push(aiMessage);
+                eventSource.emit(event_types.CHAT_CHANGED, context.chat);
+                console.log(`Telegram Bridge: Added AI reply from "${characterName}" to chat.`);
 
-                // 5. 将回复发送回桥接服务器
+                // --- 步骤 4: 将AI回复发送到Telegram ---
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     const payload = JSON.stringify({
                         type: 'ai_reply',
                         chatId: data.chatId,
-                        text: aiReply,
+                        text: aiReplyText,
                     });
                     ws.send(payload);
-                    console.log('Telegram Bridge: Sent AI reply back to bridge server.');
-
-                    // 6. (推荐) 保存聊天记录
-                    context.saveChatDebounced();
+                    console.log('Telegram Bridge: Sent AI reply to Telegram.');
                 }
+
+                // --- 步骤 5: 保存聊天记录 (这是新增的关键步骤！) ---
+                saveChatDebounced();
+                console.log('Telegram Bridge: Chat save triggered.');
             }
         } catch (error) {
             console.error('Telegram Bridge: Error processing message or generating reply:', error);
