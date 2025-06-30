@@ -35,9 +35,17 @@ SillyTavern Telegram Connector 是一个为 SillyTavern 设计的扩展，允许
    ```
    npm install node-telegram-bot-api ws
    ```
-4. 编辑 `server.js` 文件，将 `TOKEN` 替换为您的 Telegram Bot Token
+4. 复制 `config.example.js` 文件为 `config.js`：
+   ```
+   cp config.example.js config.js
+   ```
+   或在Windows系统中：
+   ```
+   copy config.example.js config.js
+   ```
+5. 编辑 `config.js` 文件，将 `YOUR_TELEGRAM_BOT_TOKEN_HERE` 替换为您的 Telegram Bot Token
    (可以通过 Telegram 的 [@BotFather](https://t.me/BotFather) 获取)
-5. 启动服务器：
+6. 启动服务器：
    ```
    node server.js
    ```

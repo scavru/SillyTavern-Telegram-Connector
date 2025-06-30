@@ -1,17 +1,29 @@
 // server.js
 const TelegramBot = require('node-telegram-bot-api');
 const WebSocket = require('ws');
+const fs = require('fs');
+const path = require('path');
+
+// 检查配置文件是否存在
+const configPath = path.join(__dirname, '../config.js');
+if (!fs.existsSync(configPath)) {
+    console.error('错误: 找不到配置文件 config.js！');
+    console.error('请复制 config.example.js 为 config.js，并设置您的Telegram Bot Token');
+    process.exit(1); // 终止程序
+}
+
+const config = require('../config');
 
 // --- 配置 ---
-// 替换成你自己的Telegram Bot Token
-const token = 'TOKEN';
+// 从配置文件中获取Telegram Bot Token和WebSocket端口
+const token = config.telegramToken;
 // WebSocket服务器端口
-const wssPort = 2333;
+const wssPort = config.wssPort;
 
 // 检查是否修改了默认token
-if (token === 'TOKEN') {
-    console.error('错误: 请先在server.js文件中设置你的Telegram Bot Token！');
-    console.error('找到 const token = \'TOKEN\'; 这一行并替换为你从BotFather获取的token');
+if (token === 'TOKEN' || token === 'YOUR_TELEGRAM_BOT_TOKEN_HERE') {
+    console.error('错误: 请先在config.js文件中设置你的Telegram Bot Token！');
+    console.error('找到 telegramToken: \'YOUR_TELEGRAM_BOT_TOKEN_HERE\' 这一行并替换为你从BotFather获取的token');
     process.exit(1); // 终止程序
 }
 

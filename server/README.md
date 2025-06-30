@@ -24,9 +24,16 @@
    ```
 
 2. 配置：
-   编辑 `server.js` 文件，将以下变量替换为您自己的值：
-   - `token`: 替换为您的 Telegram Bot Token
-   - `wssPort`: 如需更改默认端口 (2333)，可在此处修改
+   - 复制 `config.example.js` 文件为 `config.js`：
+   ```bash
+   # Linux/macOS
+   cp ../config.example.js ../config.js
+   
+   # Windows
+   copy ..\config.example.js ..\config.js
+   ```
+   - 编辑 `config.js` 文件，将 `telegramToken` 替换为您的 Telegram Bot Token
+   - 如需更改默认端口 (2333)，可修改 `wssPort` 参数
 
 3. 启动服务器：
    ```bash
@@ -48,12 +55,14 @@
   - 使用 HTTPS/WSS 加密连接
   - 实现适当的认证机制
   - 限制 IP 访问
+  - 确保 `config.js` 文件不被公开（已在 .gitignore 中设置）
 
 - 请勿将包含 Bot Token 的代码公开分享
 
 ## 故障排除
 
 - **无法启动服务器**：检查端口是否被占用，Node.js 是否正确安装
+- **找不到配置文件**：确保已复制 `config.example.js` 为 `config.js` 并放在正确位置
 - **Telegram Bot 不响应**：验证 Bot Token 是否正确，检查 Telegram API 连接状态
 - **WebSocket 连接失败**：确保防火墙未阻止指定端口，检查网络配置
 
@@ -63,3 +72,7 @@
 - WebSocket 服务器设置
 - Telegram Bot 初始化和消息处理
 - 命令解析和处理逻辑
+
+配置信息现在存储在项目根目录的 `config.js` 文件中，包括：
+- Telegram Bot Token
+- WebSocket 服务器端口
