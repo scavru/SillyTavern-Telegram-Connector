@@ -162,7 +162,7 @@ function connect() {
                             if (index >= 0 && index < characters.length) {
                                 const targetChar = characters[index];
                                 const result = await executeSlashCommandsWithOptions(`/char "${targetChar.name}"`);
-                                
+
                                 if (result && typeof result === 'string') {
                                     replyText = result;
                                 } else {
@@ -173,7 +173,7 @@ function connect() {
                             }
                             break;
                         }
-                        
+
                         // 检查是否是switchchat_数字格式
                         const chatMatch = data.command.match(/^switchchat_(\d+)$/);
                         if (chatMatch) {
@@ -183,7 +183,7 @@ function connect() {
                             }
                             const index = parseInt(chatMatch[1]) - 1;
                             const chatFiles = await getPastCharacterChats(context.characterId);
-                            
+
                             if (index >= 0 && index < chatFiles.length) {
                                 const targetChat = chatFiles[index];
                                 const chatName = targetChat.file_name.replace('.jsonl', '');
@@ -199,7 +199,7 @@ function connect() {
                             }
                             break;
                         }
-                        
+
                         // 如果不是上述任何一种命令格式，保持默认的未知命令提示
                         if (replyText === `未知命令: /${data.command}。 使用 /help 查看所有命令。`) {
                             break;
@@ -304,4 +304,16 @@ jQuery(async () => {
     }
 
     console.log('Telegram Connector 扩展已加载。');
+
+    // 为可折叠菜单添加点击逻辑
+    $('#telegram-connector-settings .sub-title').on('click', function () {
+        // 找到与标题栏相邻的 .settings-content
+        const content = $(this).siblings('.settings-content');
+
+        // 使用带动画的滑入/滑出效果来切换显示状态
+        content.slideToggle(200);
+
+        // 切换标题栏的 'closed' 类，以便CSS可以改变箭头的方向
+        $(this).toggleClass('closed');
+    });
 });
