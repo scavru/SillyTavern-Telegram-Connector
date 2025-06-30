@@ -100,6 +100,19 @@ function connect() {
                 return;
             }
 
+            // 处理服务器发来的系统命令
+            if (data.type === 'system_command') {
+                console.log('Telegram Bridge: 收到系统命令', data);
+
+                // 只处理刷新UI的命令
+                if (data.command === 'reload_ui_only') {
+                    console.log('Telegram Bridge: 正在刷新UI...');
+                    setTimeout(reloadPage, 500);
+                }
+
+                return;
+            }
+
             if (data.type === 'command_request') {
                 console.log('Telegram Bridge: 处理命令。', data);
                 let replyText = `未知命令: /${data.command}。 使用 /help 查看所有命令。`; // 更新了未知命令的提示
@@ -129,54 +142,6 @@ function connect() {
                     case 'new':
                         await executeSlashCommandsWithOptions('/newchat');
                         replyText = '新的聊天已经开始。';
-                        break;
-
-                    // --- 新增的系统管理命令 ---
-                    case 'reload':
-                        if (ws && ws.readyState === WebSocket.OPEN) {
-                            // 先通知服务器端重载
-                            ws.send(JSON.stringify({
-                                type: 'system_command',
-                                command: 'reload',
-                                chatId: data.chatId
-                            }));
-                            replyText = '正在重载服务器端组件并刷新页面...';
-                            // 发送回复后延迟刷新页面，确保消息能发送出去
-                            setTimeout(reloadPage, 1000);
-                        } else {
-                            replyText = '无法执行重载命令：WebSocket连接已断开。';
-                        }
-                        break;
-
-                    case 'restart':
-                        if (ws && ws.readyState === WebSocket.OPEN) {
-                            // 先通知服务器端重启
-                            ws.send(JSON.stringify({
-                                type: 'system_command',
-                                command: 'restart',
-                                chatId: data.chatId
-                            }));
-                            replyText = '正在刷新页面并重启服务器端组件...';
-                            // 发送回复后延迟刷新页面，确保消息能发送出去
-                            setTimeout(reloadPage, 1000);
-                        } else {
-                            replyText = '无法执行重启命令：WebSocket连接已断开。';
-                        }
-                        break;
-
-                    case 'exit':
-                        if (ws && ws.readyState === WebSocket.OPEN) {
-                            // 通知服务器端退出
-                            ws.send(JSON.stringify({
-                                type: 'system_command',
-                                command: 'exit',
-                                chatId: data.chatId
-                            }));
-                            replyText = '正在关闭服务器端组件...';
-                            // 服务器会自行关闭，WebSocket会断开连接
-                        } else {
-                            replyText = '无法执行退出命令：WebSocket连接已断开。';
-                        }
                         break;
 
                     case 'listchars': {

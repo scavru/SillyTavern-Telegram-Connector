@@ -241,6 +241,31 @@ bot.on('message', (msg) => {
 
     if (!text) return; // 忽略非文本消息
 
+    // 检查是否是系统命令
+    if (text.startsWith('/')) {
+        const parts = text.slice(1).trim().split(/\s+/); // 分割命令和参数
+        const command = parts[0].toLowerCase();
+        const args = parts.slice(1);
+
+        // 直接处理系统命令
+        if (command === 'reload' || command === 'restart' || command === 'exit') {
+            console.log(`从Telegram用户 ${chatId} 收到系统命令: "${text}"`);
+
+            // 如果是reload命令且ST连接正常，需要通知ST刷新页面
+            if (command === 'reload' && sillyTavernClient && sillyTavernClient.readyState === WebSocket.OPEN) {
+                sillyTavernClient.send(JSON.stringify({
+                    type: 'system_command',
+                    command: 'reload_ui_only',
+                    chatId: chatId
+                }));
+            }
+
+            // 直接在服务器端执行系统命令
+            handleSystemCommand(command, chatId);
+            return; // 不再继续处理
+        }
+    }
+
     if (sillyTavernClient && sillyTavernClient.readyState === WebSocket.OPEN) {
         let payload;
         if (text.startsWith('/')) {
