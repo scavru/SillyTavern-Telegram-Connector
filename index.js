@@ -20,7 +20,7 @@ import {
 
 const MODULE_NAME = 'st-telegram-connector';
 const DEFAULT_SETTINGS = {
-    bridgeUrl: 'ws://192.168.31.194:2333',
+    bridgeUrl: 'ws://127.0.0.1:2333',
 };
 
 let ws = null; // WebSocket实例
@@ -45,24 +45,24 @@ function updateStatus(message, color) {
 // 连接到WebSocket服务器
 function connect() {
     if (ws && ws.readyState === WebSocket.OPEN) {
-        console.log('Telegram Bridge: Already connected.');
+        console.log('Telegram Bridge: 已连接');
         return;
     }
 
     const settings = getSettings();
     if (!settings.bridgeUrl) {
-        updateStatus('Bridge URL is not set!', 'red');
+        updateStatus('Telegram Bridge URL 未设置！', 'red');
         return;
     }
 
-    updateStatus('Connecting...', 'orange');
-    console.log(`Telegram Bridge: Connecting to ${settings.bridgeUrl}...`);
+    updateStatus('连接中...', 'orange');
+    console.log(`Telegram Bridge: 正在连接 ${settings.bridgeUrl}...`);
 
     ws = new WebSocket(settings.bridgeUrl);
 
     ws.onopen = () => {
-        console.log('Telegram Bridge: Connection successful!');
-        updateStatus('Connected', 'green');
+        console.log('Telegram Bridge: 连接成功！');
+        updateStatus('已连接', 'green');
     };
 
     ws.onmessage = async (event) => {
@@ -72,12 +72,12 @@ function connect() {
 
             if (data.type === 'user_message') {
                 // ... (普通聊天逻辑，保持不变) ...
-                console.log('Telegram Bridge: Received user message.', data);
+                console.log('Telegram Bridge: 收到用户消息。', data);
 
                 const userMessage = { name: 'You', is_user: true, is_name: true, send_date: Date.now(), mes: data.text };
                 context.chat.push(userMessage);
                 eventSource.emit(event_types.CHAT_CHANGED, context.chat);
-                console.log('Telegram Bridge: Added user message. Generating reply...');
+                console.log('Telegram Bridge: 添加用户消息。正在生成回复...');
 
                 const aiReplyText = await generateQuietPrompt(null, false);
 
@@ -85,7 +85,7 @@ function connect() {
                 const aiMessage = { name: characterName, is_user: false, is_name: true, send_date: Date.now(), mes: aiReplyText };
                 context.chat.push(aiMessage);
                 eventSource.emit(event_types.CHAT_CHANGED, context.chat);
-                console.log(`Telegram Bridge: Added AI reply for "${characterName}".`);
+                console.log(`Telegram Bridge: 为 "${characterName}" 添加AI回复。`);
 
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     ws.send(JSON.stringify({ type: 'ai_reply', chatId: data.chatId, text: aiReplyText }));
@@ -95,23 +95,23 @@ function connect() {
             }
 
             if (data.type === 'command_request') {
-                console.log('Telegram Bridge: Processing command.', data);
-                let replyText = `Unknown command: /${data.command}. Use /help to see all commands.`; // 更新了未知命令的提示
+                console.log('Telegram Bridge: 处理命令。', data);
+                let replyText = `未知命令: /${data.command}。 使用 /help 查看所有命令。`; // 更新了未知命令的提示
                 const { executeSlashCommandsWithOptions, openCharacterChat } = context;
 
                 switch (data.command) {
                     // --- 新增的 /help 命令 ---
                     case 'help':
-                        replyText = `SillyTavern Telegram Bridge Commands:\n\n`;
-                        replyText += `💬 *Chat Management*\n`;
-                        replyText += `  \`/new\` - Start a new chat with the current character.\n`;
-                        replyText += `  \`/listchats\` - List all saved chats for the current character.\n`;
-                        replyText += `  \`/switchchat <chat_name>\` - Load a specific chat history.\n\n`;
-                        replyText += `🎭 *Character Management*\n`;
-                        replyText += `  \`/listchars\` - List all available characters.\n`;
-                        replyText += `  \`/switchchar <char_name>\` - Switch to a different character.\n\n`;
-                        replyText += `ℹ️ *Help*\n`;
-                        replyText += `  \`/help\` - Show this help message.`;
+                        replyText = `SillyTavern Telegram Bridge 命令：\n\n`;
+                        replyText += `聊天管理\n`;
+                        replyText += `  /new - 开始与当前角色的新聊天。\n`;
+                        replyText += `  /listchats - 列出当前角色的所有已保存的聊天记录。\n`;
+                        replyText += `  /switchchat <chat_name> - 加载特定的聊天记录。\n\n`;
+                        replyText += `角色管理\n`;
+                        replyText += `  /listchars - 列出所有可用角色。\n`;
+                        replyText += `  /switchchar <char_name> - 切换到不同的角色。\n\n`;
+                        replyText += `帮助\n`;
+                        replyText += `  /help - 显示此帮助信息。`;
                         break;
                     // --- 现有命令保持不变 ---
                     case 'new':
@@ -121,7 +121,7 @@ function connect() {
 
                     case 'listchars': {
                         const characters = context.characters.slice(1);
-                        replyText = '可用角色列表:\n\n' + characters.map(c => `- ${c.name}`).join('\n');
+                        replyText = '可用角色列表：\n\n' + characters.map(c => `- ${c.name}`).join('\n');
                         break;
                     }
 
@@ -136,7 +136,7 @@ function connect() {
                         if (result && typeof result === 'string') {
                             replyText = result;
                         } else {
-                            replyText = `尝试切换到角色 "${targetName}"，但未收到明确的成功信息。`;
+                            replyText = `已尝试切换到角色 "${targetName}"。`;
                         }
                         break;
                     }
@@ -148,7 +148,7 @@ function connect() {
                         }
                         const chatFiles = await getPastCharacterChats(context.characterId);
                         if (chatFiles.length > 0) {
-                            replyText = '当前角色的聊天记录:\n\n' + chatFiles.map(f => `- ${f.file_name.replace('.jsonl', '')}`).join('\n');
+                            replyText = '当前角色的聊天记录：\n\n' + chatFiles.map(f => `- ${f.file_name.replace('.jsonl', '')}`).join('\n');
                         } else {
                             replyText = '当前角色没有任何聊天记录。';
                         }
@@ -157,13 +157,13 @@ function connect() {
 
                     case 'switchchat': {
                         if (data.args.length === 0) {
-                            replyText = '请提供聊天记录名称。用法: /switchchat <聊天记录名称>';
+                            replyText = '请提供聊天记录名称。用法： /switchchat <聊天记录名称>';
                             break;
                         }
                         const targetChatFile = `${data.args.join(' ')}`;
                         try {
                             await openCharacterChat(targetChatFile);
-                            replyText = `已加载聊天记录: ${data.args.join(' ')}`;
+                            replyText = `已加载聊天记录： ${data.args.join(' ')}`;
                         } catch (err) {
                             console.error(err);
                             replyText = `加载聊天记录 "${data.args.join(' ')}" 失败。请确认名称完全正确。`;
@@ -178,7 +178,7 @@ function connect() {
                 }
             }
         } catch (error) {
-            console.error('Telegram Bridge: Error processing message or command:', error);
+            console.error('Telegram Bridge: 处理请求时发生错误：', error);
             if (data && data.chatId && ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({ type: 'ai_reply', chatId: data.chatId, text: '处理您的请求时发生了一个内部错误。' }));
             }
@@ -186,14 +186,14 @@ function connect() {
     };
 
     ws.onclose = () => {
-        console.log('Telegram Bridge: Connection closed.');
-        updateStatus('Disconnected', 'red');
+        console.log('Telegram Bridge: 连接已关闭。');
+        updateStatus('连接已断开', 'red');
         ws = null;
     };
 
     ws.onerror = (error) => {
-        console.error('Telegram Bridge: WebSocket error:', error);
-        updateStatus('Connection Error', 'red');
+        console.error('Telegram Bridge: WebSocket 错误：', error);
+        updateStatus('连接错误', 'red');
         ws = null;
     };
 }
@@ -207,13 +207,13 @@ function disconnect() {
 // 扩展加载时执行的函数
 jQuery(async () => {
     // 调试信息，确认代码块被执行
-    console.log('Attempting to load Telegram Connector settings UI...');
+    console.log('正在尝试加载 Telegram Connector 设置 UI...');
 
     // 加载设置UI (已修正URL路径)
     try {
         const settingsHtml = await $.get(`/scripts/extensions/third-party/${MODULE_NAME}/settings.html`);
         $('#extensions_settings').append(settingsHtml);
-        console.log('Telegram Connector settings UI should now be appended.');
+        console.log('Telegram Connector 设置 UI 应该已经被添加。');
 
         const settings = getSettings();
         $('#telegram_bridge_url').val(settings.bridgeUrl);
@@ -228,9 +228,9 @@ jQuery(async () => {
         $('#telegram_disconnect_button').on('click', disconnect);
 
     } catch (error) {
-        console.error('Failed to load Telegram Connector settings HTML.', error);
+        console.error('加载 Telegram Connector 设置 HTML 失败。', error);
         // 在这里可以添加一些用户友好的错误提示到UI上
     }
 
-    console.log('Telegram Connector extension loaded.');
+    console.log('Telegram Connector 扩展已加载。');
 });
