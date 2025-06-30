@@ -213,6 +213,12 @@ function restartServer(chatId) {
 function exitServer(chatId) {
     console.log('正在关闭服务器...');
 
+    // 设置强制退出定时器，确保在任何情况下服务器都会退出
+    const forceExitTimeout = setTimeout(() => {
+        console.error('退出操作超时，强制退出进程');
+        process.exit(1);
+    }, 10000); // 10秒后强制退出
+
     // 清理重启保护文件
     try {
         if (fs.existsSync(RESTART_PROTECTION_FILE)) {
@@ -223,35 +229,101 @@ function exitServer(chatId) {
         console.error('清理重启保护文件失败:', error);
     }
 
+    // 定义最终退出函数
+    const finalExit = () => {
+        clearTimeout(forceExitTimeout);
+        console.log('服务器端组件已成功关闭');
+        process.exit(0);
+    };
+
     // 关闭WebSocket服务器
     if (wss) {
-        wss.close(() => {
-            console.log('WebSocket服务器已关闭');
-
-            // 停止Telegram Bot
-            bot.stopPolling().then(() => {
-                console.log('Telegram Bot已停止');
-
-                // 发送最终通知（如果可能）
-                if (chatId) {
-                    bot.sendMessage(chatId, '服务器端组件已成功关闭')
-                        .finally(() => {
-                            console.log('服务器端组件已成功关闭');
-                            process.exit(0);
-                        });
+        try {
+            wss.close((err) => {
+                if (err) {
+                    console.error('关闭WebSocket服务器时出错:', err);
                 } else {
-                    console.log('服务器端组件已成功关闭');
-                    process.exit(0);
+                    console.log('WebSocket服务器已关闭');
+                }
+
+                // 无论成功与否，继续尝试停止Telegram Bot
+                try {
+                    bot.stopPolling()
+                        .then(() => {
+                            console.log('Telegram Bot已停止');
+
+                            // 尝试发送最终通知
+                            if (chatId) {
+                                bot.sendMessage(chatId, '服务器端组件已成功关闭')
+                                    .then(() => finalExit())
+                                    .catch(err => {
+                                        console.error('发送最终通知失败:', err);
+                                        finalExit();
+                                    });
+                            } else {
+                                finalExit();
+                            }
+                        })
+                        .catch(err => {
+                            console.error('停止Telegram Bot时出错:', err);
+                            if (chatId) {
+                                try {
+                                    bot.sendMessage(chatId, '服务器关闭过程中出现错误，正在强制退出')
+                                        .finally(() => finalExit());
+                                } catch (e) {
+                                    finalExit();
+                                }
+                            } else {
+                                finalExit();
+                            }
+                        });
+                } catch (botError) {
+                    console.error('调用bot.stopPolling时出错:', botError);
+                    finalExit();
                 }
             });
-        });
+        } catch (wssError) {
+            console.error('调用wss.close时出错:', wssError);
+
+            // WebSocket关闭失败，继续尝试停止Telegram Bot
+            try {
+                bot.stopPolling()
+                    .finally(() => {
+                        if (chatId) {
+                            try {
+                                bot.sendMessage(chatId, '服务器关闭过程中出现错误，正在强制退出')
+                                    .finally(() => finalExit());
+                            } catch (e) {
+                                finalExit();
+                            }
+                        } else {
+                            finalExit();
+                        }
+                    });
+            } catch (e) {
+                finalExit();
+            }
+        }
     } else {
-        // 如果WebSocket服务器不存在，直接退出
-        if (chatId) {
-            bot.sendMessage(chatId, '服务器端组件已成功关闭')
-                .finally(() => process.exit(0));
-        } else {
-            process.exit(0);
+        // 如果WebSocket服务器不存在，直接停止Telegram Bot
+        try {
+            bot.stopPolling()
+                .then(() => {
+                    console.log('Telegram Bot已停止');
+                    if (chatId) {
+                        bot.sendMessage(chatId, '服务器端组件已成功关闭')
+                            .finally(() => finalExit());
+                    } else {
+                        finalExit();
+                    }
+                })
+                .catch(err => {
+                    console.error('停止Telegram Bot时出错:', err);
+                    finalExit();
+                });
+        } catch (e) {
+            console.error('调用bot.stopPolling时出错:', e);
+            finalExit();
         }
     }
 }
