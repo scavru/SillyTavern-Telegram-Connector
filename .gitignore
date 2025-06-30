@@ -1,0 +1,54 @@
+# Node.js 相关
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+package-lock.json
+yarn.lock
+
+# 环境配置
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+
+# 日志
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 运行时数据
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# 目录
+dist/
+build/
+coverage/
+
+# 临时文件
+.tmp/
+.temp/
+
+# 编辑器配置
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# 特定于项目的忽略
+# 在此处添加您的项目特定忽略项
+config.js
+token.js 

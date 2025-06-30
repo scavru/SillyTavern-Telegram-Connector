@@ -1,33 +1,84 @@
-# SillyTavern Extension Example
+# SillyTavern Telegram Connector
 
-*Provide a brief description of how your extension works, what problem it aims to solve.*
+SillyTavern Telegram Connector 是一个为 SillyTavern 设计的扩展，允许用户通过 Telegram 与 SillyTavern 中的 AI 角色进行交互。该扩展建立了 SillyTavern 与 Telegram 机器人之间的桥接，使用户能够在移动设备上随时随地与他们喜爱的 AI 角色聊天。
 
-## Features
+## 功能特点
 
-*Describe some of the main selling points of your extension.*
+- **Telegram 集成**：通过 Telegram 应用与 SillyTavern 中的 AI 角色进行对话
+- **实时同步**：Telegram 中的对话会实时同步到 SillyTavern 界面，反之亦然
+- **命令支持**：提供多种 Telegram 命令，用于管理聊天和角色
+  - `/help` - 显示所有可用命令
+  - `/new` - 开始新的聊天
+  - `/listchars` - 列出所有可用角色
+  - `/switchchar <角色名称>` - 切换到指定角色
+  - `/listchats` - 列出当前角色的所有聊天记录
+  - `/switchchat <聊天名称>` - 切换到指定聊天记录
+- **简单配置**：通过 WebSocket 连接，易于设置和使用
 
-## Installation and Usage
+## 安装和使用
 
-### Installation
+### 扩展安装
 
-*In most cases, this should just be using ST's inbuilt extension installer.* 
+1. 在 SillyTavern 中，导航至 "Extensions" 标签页
+2. 点击 "Install Extension"
+3. 输入以下 URL: `https://github.com/qiqi20020612/st-telegram-connector`
+4. 点击 "Install" 按钮
+5. 安装完成后，重启 SillyTavern
 
-### Usage
+### 服务器设置
 
-*Explain how to use this extension.*
+1. 克隆或下载此仓库到您的计算机
+2. 进入 `server` 目录
+3. 安装依赖：
+   ```
+   npm install node-telegram-bot-api ws
+   ```
+4. 编辑 `server.js` 文件，将 `TOKEN` 替换为您的 Telegram Bot Token
+   (可以通过 Telegram 的 [@BotFather](https://t.me/BotFather) 获取)
+5. 启动服务器：
+   ```
+   node server.js
+   ```
 
-## Prerequisites
+### 连接配置
 
-*Specify the version of ST necessary here.*
+1. 在 SillyTavern 中，进入 "Extensions" 标签页
+2. 找到 "Telegram Connector" 部分
+3. 在 "Bridge 服务器 WebSocket URL" 字段中输入 WebSocket 服务器地址
+   (默认为 `ws://127.0.0.1:2333`)
+4. 点击 "连接" 按钮
+5. 状态显示 "已连接" 后，即可开始使用
 
-## Support and Contributions
+### Telegram 使用方法
 
-*Where should someone ask for support?*
+1. 在 Telegram 中，搜索并开始与您创建的机器人对话
+2. 发送任何消息开始聊天
+3. 您的消息将被发送到 SillyTavern，AI 的回复会自动发送回 Telegram
+4. 使用 `/help` 命令查看所有可用命令
 
-*Consider including your own contact info for help/questions.*
+## 系统要求
 
-*How can people help add to this extension?*
+- Node.js 14.0 或更高版本
+- 运行中的 SillyTavern 实例
+- 互联网连接（用于 Telegram API）
+- 如果服务器在公网访问，建议使用 HTTPS/WSS
 
-## License
+## 故障排除
 
-*Be cool, use an open source license.*
+- **连接问题**：确保 WebSocket 服务器正在运行，并且 URL 配置正确
+- **Bot 无响应**：检查 Telegram Bot Token 是否正确，以及服务器日志中是否有错误
+- **消息不同步**：确保 SillyTavern 扩展已连接到 WebSocket 服务器
+
+## 支持和贡献
+
+如果您遇到问题或有改进建议，请通过以下方式联系：
+
+- 创建 GitHub Issue
+- 联系作者：ZMou
+- 访问作者主页：https://zmoutech.cn
+
+欢迎提交 Pull Request 来改进此扩展！
+
+## 许可证
+
+本项目采用 GNU General Public License v3.0 (GPL-3.0) 许可证 - 详情请参阅 LICENSE 文件

@@ -37,7 +37,7 @@ function getSettings() {
 function updateStatus(message, color) {
     const statusEl = document.getElementById('telegram_connection_status');
     if (statusEl) {
-        statusEl.textContent = `Status: ${message}`;
+        statusEl.textContent = `状态： ${message}`;
         statusEl.style.color = color;
     }
 }
