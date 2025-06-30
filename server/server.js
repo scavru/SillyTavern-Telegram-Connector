@@ -8,6 +8,13 @@ const token = 'TOKEN';
 // WebSocket服务器端口
 const wssPort = 2333;
 
+// 检查是否修改了默认token
+if (token === 'TOKEN') {
+    console.error('错误: 请先在server.js文件中设置你的Telegram Bot Token！');
+    console.error('找到 const token = \'TOKEN\'; 这一行并替换为你从BotFather获取的token');
+    process.exit(1); // 终止程序
+}
+
 // 初始化Telegram Bot
 const bot = new TelegramBot(token, { polling: true });
 console.log('Telegram Bot已启动...');
