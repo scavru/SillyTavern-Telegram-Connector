@@ -37,6 +37,160 @@ console.log(`WebSocket服务器正在监听端口 ${wssPort}...`);
 
 let sillyTavernClient = null; // 用于存储连接的SillyTavern扩展客户端
 
+// 系统命令处理函数
+function handleSystemCommand(command, chatId) {
+    console.log(`执行系统命令: ${command}`);
+
+    switch (command) {
+        case 'reload':
+            // 重载服务器端组件
+            console.log('正在重载服务器端组件...');
+            reloadServer(chatId);
+            break;
+
+        case 'restart':
+            // 重启服务器端组件
+            console.log('正在重启服务器端组件...');
+            restartServer(chatId);
+            break;
+
+        case 'exit':
+            // 退出服务器端组件
+            console.log('正在退出服务器端组件...');
+            exitServer(chatId);
+            break;
+
+        default:
+            console.warn(`未知的系统命令: ${command}`);
+            if (chatId) {
+                bot.sendMessage(chatId, `未知的系统命令: /${command}`);
+            }
+    }
+}
+
+// 重载服务器函数
+function reloadServer(chatId) {
+    // 在这里执行重载逻辑
+    console.log('重载服务器端组件...');
+
+    // 清除require缓存，这样可以重新加载模块
+    Object.keys(require.cache).forEach(function (key) {
+        if (key.indexOf('node_modules') === -1) { // 不清除node_modules中的模块
+            delete require.cache[key];
+        }
+    });
+
+    // 特别确保配置文件被重新加载
+    try {
+        // 清除配置文件的缓存
+        delete require.cache[require.resolve('./config.js')];
+
+        // 重新加载配置文件
+        const newConfig = require('./config.js');
+
+        // 更新配置
+        Object.assign(config, newConfig);
+
+        console.log('配置文件已重新加载');
+    } catch (error) {
+        console.error('重新加载配置文件时出错:', error);
+        if (chatId) {
+            bot.sendMessage(chatId, '重新加载配置文件时出错: ' + error.message);
+        }
+        return;
+    }
+
+    console.log('服务器端组件已重载');
+
+    // 发送操作完成通知
+    if (chatId) {
+        bot.sendMessage(chatId, '服务器端组件已成功重载，配置文件已更新');
+    }
+}
+
+// 重启服务器函数
+function restartServer(chatId) {
+    console.log('重启服务器端组件...');
+
+    // 如果有chatId，先发送一条消息
+    if (chatId) {
+        bot.sendMessage(chatId, '正在重启服务器端组件，请稍候...');
+    }
+
+    // 关闭当前的WebSocket连接
+    if (wss) {
+        wss.close(() => {
+            console.log('WebSocket服务器已关闭，准备重启...');
+
+            // 使用setTimeout确保WebSocket完全关闭后再重启
+            setTimeout(() => {
+                // 使用child_process在新进程中重启服务器
+                const { spawn } = require('child_process');
+                const serverPath = path.join(__dirname, 'server.js');
+
+                console.log(`重启服务器: ${serverPath}`);
+
+                // 将chatId作为环境变量传递给新进程
+                const env = Object.assign({}, process.env);
+                if (chatId) {
+                    env.RESTART_NOTIFY_CHATID = chatId.toString();
+                }
+
+                const child = spawn(process.execPath, [serverPath], {
+                    detached: true,
+                    stdio: 'inherit',
+                    env: env
+                });
+
+                child.unref();
+                process.exit(0); // 退出当前进程
+            }, 1000);
+        });
+    }
+}
+
+// 退出服务器函数
+function exitServer(chatId) {
+    console.log('正在关闭服务器...');
+
+    // 如果有chatId，先发送一条消息
+    if (chatId) {
+        bot.sendMessage(chatId, '正在关闭服务器端组件...');
+    }
+
+    // 关闭WebSocket服务器
+    if (wss) {
+        wss.close(() => {
+            console.log('WebSocket服务器已关闭');
+
+            // 停止Telegram Bot
+            bot.stopPolling().then(() => {
+                console.log('Telegram Bot已停止');
+
+                // 发送最终通知（如果可能）
+                if (chatId) {
+                    bot.sendMessage(chatId, '服务器端组件已成功关闭')
+                        .finally(() => {
+                            console.log('服务器端组件已成功关闭');
+                            process.exit(0);
+                        });
+                } else {
+                    console.log('服务器端组件已成功关闭');
+                    process.exit(0);
+                }
+            });
+        });
+    } else {
+        // 如果WebSocket服务器不存在，直接退出
+        if (chatId) {
+            bot.sendMessage(chatId, '服务器端组件已成功关闭')
+                .finally(() => process.exit(0));
+        } else {
+            process.exit(0);
+        }
+    }
+}
+
 wss.on('connection', ws => {
     console.log('SillyTavern扩展已连接！');
     sillyTavernClient = ws;
@@ -48,6 +202,9 @@ wss.on('connection', ws => {
             if (data.type === 'ai_reply' && data.chatId) {
                 console.log(`收到AI回复，准备发送至Telegram用户 ${data.chatId}`);
                 bot.sendMessage(data.chatId, data.text);
+            } else if (data.type === 'system_command' && data.command) {
+                // 处理系统命令
+                handleSystemCommand(data.command, data.chatId);
             }
         } catch (error) {
             console.error('处理SillyTavern消息时出错:', error);
@@ -64,6 +221,18 @@ wss.on('connection', ws => {
         sillyTavernClient = null;
     });
 });
+
+// 检查是否需要发送重启完成通知
+if (process.env.RESTART_NOTIFY_CHATID) {
+    const chatId = parseInt(process.env.RESTART_NOTIFY_CHATID);
+    if (!isNaN(chatId)) {
+        // 等待一小段时间确保bot已经准备好
+        setTimeout(() => {
+            bot.sendMessage(chatId, '服务器端组件已成功重启并准备就绪')
+                .catch(err => console.error('发送重启通知失败:', err));
+        }, 2000);
+    }
+}
 
 // 监听Telegram消息
 bot.on('message', (msg) => {

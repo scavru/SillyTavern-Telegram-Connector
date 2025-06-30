@@ -43,6 +43,11 @@ function updateStatus(message, color) {
     }
 }
 
+// 刷新页面
+function reloadPage() {
+    window.location.reload();
+}
+
 // 连接到WebSocket服务器
 function connect() {
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -113,6 +118,10 @@ function connect() {
                         replyText += `  /listchars - 列出所有可用角色。\n`;
                         replyText += `  /switchchar <char_name> - 切换到指定角色。\n`;
                         replyText += `  /switchchar_<序号> - 通过序号切换角色。\n\n`;
+                        replyText += `系统管理\n`;
+                        replyText += `  /reload - 重载插件的服务器端组件并刷新ST网页。\n`;
+                        replyText += `  /restart - 刷新ST网页并重启插件的服务器端组件。\n`;
+                        replyText += `  /exit - 退出插件的服务器端组件。\n\n`;
                         replyText += `帮助\n`;
                         replyText += `  /help - 显示此帮助信息。`;
                         break;
@@ -120,6 +129,54 @@ function connect() {
                     case 'new':
                         await executeSlashCommandsWithOptions('/newchat');
                         replyText = '新的聊天已经开始。';
+                        break;
+
+                    // --- 新增的系统管理命令 ---
+                    case 'reload':
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            // 先通知服务器端重载
+                            ws.send(JSON.stringify({
+                                type: 'system_command',
+                                command: 'reload',
+                                chatId: data.chatId
+                            }));
+                            replyText = '正在重载服务器端组件并刷新页面...';
+                            // 发送回复后延迟刷新页面，确保消息能发送出去
+                            setTimeout(reloadPage, 1000);
+                        } else {
+                            replyText = '无法执行重载命令：WebSocket连接已断开。';
+                        }
+                        break;
+
+                    case 'restart':
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            // 先通知服务器端重启
+                            ws.send(JSON.stringify({
+                                type: 'system_command',
+                                command: 'restart',
+                                chatId: data.chatId
+                            }));
+                            replyText = '正在刷新页面并重启服务器端组件...';
+                            // 发送回复后延迟刷新页面，确保消息能发送出去
+                            setTimeout(reloadPage, 1000);
+                        } else {
+                            replyText = '无法执行重启命令：WebSocket连接已断开。';
+                        }
+                        break;
+
+                    case 'exit':
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            // 通知服务器端退出
+                            ws.send(JSON.stringify({
+                                type: 'system_command',
+                                command: 'exit',
+                                chatId: data.chatId
+                            }));
+                            replyText = '正在关闭服务器端组件...';
+                            // 服务器会自行关闭，WebSocket会断开连接
+                        } else {
+                            replyText = '无法执行退出命令：WebSocket连接已断开。';
+                        }
                         break;
 
                     case 'listchars': {
