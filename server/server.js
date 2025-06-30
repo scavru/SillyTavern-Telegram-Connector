@@ -5,14 +5,14 @@ const fs = require('fs');
 const path = require('path');
 
 // 检查配置文件是否存在
-const configPath = path.join(__dirname, '../config.js');
+const configPath = path.join(__dirname, './config.js');
 if (!fs.existsSync(configPath)) {
     console.error('错误: 找不到配置文件 config.js！');
-    console.error('请复制 config.example.js 为 config.js，并设置您的Telegram Bot Token');
+    console.error('请在server目录下复制 config.example.js 为 config.js，并设置您的Telegram Bot Token');
     process.exit(1); // 终止程序
 }
 
-const config = require('../config');
+const config = require('./config');
 
 // --- 配置 ---
 // 从配置文件中获取Telegram Bot Token和WebSocket端口
