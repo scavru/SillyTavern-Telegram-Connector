@@ -1,18 +1,17 @@
 // index.js
 
-// 【修改】: 只从 getContext() 解构出稳定且已确认存在的函数和对象
+// 导入SillyTavern的上下文和核心函数
 const {
     extensionSettings,
     saveSettingsDebounced,
 } = SillyTavern.getContext();
 
-// 【修改】: 将 getPastCharacterChats 添加到直接导入列表
+// 导入非稳定但必要的接口
 import {
     generateQuietPrompt,
     saveChatDebounced,
     eventSource,
     event_types,
-    getPastCharacterChats, // <-- 从这里导入
 } from "../../../../script.js";
 
 const MODULE_NAME = 'SillyTavern-Telegram-Connector';
@@ -23,8 +22,12 @@ const DEFAULT_SETTINGS = {
 
 let ws = null; // WebSocket实例
 
-// ... (getSettings, updateStatus, reloadPage 函数保持不变) ...
+// 用于生成唯一的流式会话ID
+function generateStreamId() {
+    return Date.now().toString(36) + Math.random().toString(36).substring(2);
+}
 
+// 获取或初始化设置
 function getSettings() {
     if (!extensionSettings[MODULE_NAME]) {
         extensionSettings[MODULE_NAME] = { ...DEFAULT_SETTINGS };
@@ -32,6 +35,7 @@ function getSettings() {
     return extensionSettings[MODULE_NAME];
 }
 
+// 更新连接状态显示
 function updateStatus(message, color) {
     const statusEl = document.getElementById('telegram_connection_status');
     if (statusEl) {
@@ -40,6 +44,7 @@ function updateStatus(message, color) {
     }
 }
 
+// 刷新页面
 function reloadPage() {
     window.location.reload();
 }
@@ -76,6 +81,7 @@ function connect() {
             if (data.type === 'user_message') {
                 console.log('Telegram Bridge: 收到用户消息。', data);
 
+                const { addOneMessage } = SillyTavern.getContext();
                 const userMessage = {
                     name: 'You',
                     is_user: true,
@@ -84,15 +90,52 @@ function connect() {
                     mes: data.text
                 };
                 context.chat.push(userMessage);
-                SillyTavern.getContext().addOneMessage(userMessage);
+                addOneMessage(userMessage);
 
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     ws.send(JSON.stringify({ type: 'typing_action', chatId: data.chatId }));
                 }
 
-                const aiReplyText = await generateQuietPrompt(data.text, false, false);
+                // 启动流式生成流程
+                const streamId = generateStreamId();
+                let fullReplyText = '';
 
-                if (aiReplyText) {
+                // 1. 通知后端流式传输开始
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'stream_start', chatId: data.chatId, streamId }));
+                }
+
+                // 2. 设置流式事件监听器
+                const streamCallback = (text) => {
+                    fullReplyText = text;
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({
+                            type: 'stream_chunk',
+                            chatId: data.chatId,
+                            streamId,
+                            text: fullReplyText
+                        }));
+                    }
+                };
+                eventSource.on(event_types.STREAM_TOKEN_RECEIVED, streamCallback);
+
+                // 3. 开始生成
+                await generateQuietPrompt(data.text, false, false);
+
+                // 4. 生成结束后清理
+                eventSource.removeListener(event_types.STREAM_TOKEN_RECEIVED, streamCallback);
+
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({
+                        type: 'stream_end',
+                        chatId: data.chatId,
+                        streamId,
+                        text: fullReplyText
+                    }));
+                }
+
+                // 5. 在SillyTavern UI中更新最终消息
+                if (fullReplyText) {
                     context = SillyTavern.getContext();
                     const characterName = context.characters[context.characterId].name;
                     const aiMessage = {
@@ -100,15 +143,10 @@ function connect() {
                         is_user: false,
                         is_name: true,
                         send_date: Date.now(),
-                        mes: aiReplyText
+                        mes: fullReplyText
                     };
                     context.chat.push(aiMessage);
-                    SillyTavern.getContext().addOneMessage(aiMessage);
-
-                    if (ws && ws.readyState === WebSocket.OPEN) {
-                        ws.send(JSON.stringify({ type: 'ai_reply', chatId: data.chatId, text: aiReplyText }));
-                    }
-
+                    addOneMessage(aiMessage);
                     saveChatDebounced();
                 } else {
                     console.error("Telegram Bridge: AI回复为空，不发送。");
@@ -133,7 +171,7 @@ function connect() {
                 }
 
                 let replyText = `未知命令: /${data.command}。 使用 /help 查看所有命令。`;
-                const { executeSlashCommandsWithOptions, openCharacterChat } = SillyTavern.getContext();
+                const { executeSlashCommandsWithOptions, openCharacterChat, doNewChat, getPastCharacterChats } = SillyTavern.getContext();
 
                 switch (data.command) {
                     case 'help':
@@ -155,7 +193,7 @@ function connect() {
                         replyText += `/help - 显示此帮助信息。`;
                         break;
                     case 'new':
-                        await executeSlashCommandsWithOptions('/newchat');
+                        await doNewChat({ deleteCurrentChat: false });
                         replyText = '新的聊天已经开始。';
                         break;
                     case 'listchars': {
@@ -178,26 +216,28 @@ function connect() {
                             break;
                         }
                         const targetName = data.args.join(' ');
-                        await executeSlashCommandsWithOptions(`/char "${targetName}"`);
+                        const result = await executeSlashCommandsWithOptions(`/char "${targetName}"`);
 
-                        await new Promise(resolve => setTimeout(resolve, 200));
-                        const newContext = SillyTavern.getContext();
-                        const currentCharacter = newContext.characters[newContext.characterId];
-                        if (currentCharacter && currentCharacter.name === targetName) {
-                            replyText = `已成功切换到角色 "${targetName}"。`;
+                        if (result && typeof result === 'string') {
+                            replyText = result;
                         } else {
-                            replyText = `已发送切换到角色 "${targetName}" 的命令。`;
+                            await new Promise(resolve => setTimeout(resolve, 200)); // 等待UI更新
+                            const newContext = SillyTavern.getContext();
+                            const currentCharacter = newContext.characters[newContext.characterId];
+                            if (currentCharacter && currentCharacter.name === targetName) {
+                                replyText = `已成功切换到角色 "${targetName}"。`;
+                            } else {
+                                replyText = `已尝试切换到角色 "${targetName}"。`;
+                            }
                         }
                         break;
                     }
                     case 'listchats': {
-                        // 【修改】: 直接调用导入的 getPastCharacterChats
-                        const currentContext = SillyTavern.getContext();
-                        if (currentContext.characterId === undefined) {
+                        if (context.characterId === undefined) {
                             replyText = '请先选择一个角色。';
                             break;
                         }
-                        const chatFiles = await getPastCharacterChats(currentContext.characterId);
+                        const chatFiles = await getPastCharacterChats(context.characterId);
                         if (chatFiles.length > 0) {
                             replyText = '当前角色的聊天记录：\n\n';
                             chatFiles.forEach((chat, index) => {
@@ -225,6 +265,7 @@ function connect() {
                         }
                         break;
                     }
+
                     default: {
                         const charMatch = data.command.match(/^switchchar_(\d+)$/);
                         if (charMatch) {
@@ -251,14 +292,12 @@ function connect() {
 
                         const chatMatch = data.command.match(/^switchchat_(\d+)$/);
                         if (chatMatch) {
-                            const currentContext = SillyTavern.getContext();
-                            if (currentContext.characterId === undefined) {
+                            if (context.characterId === undefined) {
                                 replyText = '请先选择一个角色。';
                                 break;
                             }
                             const index = parseInt(chatMatch[1]) - 1;
-                            // 【修改】: 直接调用导入的 getPastCharacterChats
-                            const chatFiles = await getPastCharacterChats(currentContext.characterId);
+                            const chatFiles = await getPastCharacterChats(context.characterId);
 
                             if (index >= 0 && index < chatFiles.length) {
                                 const targetChat = chatFiles[index];
