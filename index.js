@@ -1,32 +1,30 @@
 // index.js
 
-// 导入SillyTavern的上下文和核心函数
+// 【修改】: 只从 getContext() 解构出稳定且已确认存在的函数和对象
 const {
-    getContext,
-    getApiUrl, // 虽然此项目不用API，但这是个好习惯
     extensionSettings,
     saveSettingsDebounced,
 } = SillyTavern.getContext();
 
-// 我们需要从更深层级导入生成函数
-// 警告：这种直接导入方式可能在SillyTavern更新后失效，但目前是最高效的方式
+// 【修改】: 将 getPastCharacterChats 添加到直接导入列表
 import {
     generateQuietPrompt,
+    saveChatDebounced,
     eventSource,
     event_types,
-    saveChatDebounced,
-    getPastCharacterChats // <-- 从TopInfoBar学到的，用于获取聊天列表
+    getPastCharacterChats, // <-- 从这里导入
 } from "../../../../script.js";
 
 const MODULE_NAME = 'SillyTavern-Telegram-Connector';
 const DEFAULT_SETTINGS = {
     bridgeUrl: 'ws://127.0.0.1:2333',
-    autoConnect: true, // 添加自动连接设置，默认为开启
+    autoConnect: true,
 };
 
 let ws = null; // WebSocket实例
 
-// 获取或初始化设置
+// ... (getSettings, updateStatus, reloadPage 函数保持不变) ...
+
 function getSettings() {
     if (!extensionSettings[MODULE_NAME]) {
         extensionSettings[MODULE_NAME] = { ...DEFAULT_SETTINGS };
@@ -34,7 +32,6 @@ function getSettings() {
     return extensionSettings[MODULE_NAME];
 }
 
-// 更新连接状态显示
 function updateStatus(message, color) {
     const statusEl = document.getElementById('telegram_connection_status');
     if (statusEl) {
@@ -43,7 +40,6 @@ function updateStatus(message, color) {
     }
 }
 
-// 刷新页面
 function reloadPage() {
     window.location.reload();
 }
@@ -72,65 +68,74 @@ function connect() {
     };
 
     ws.onmessage = async (event) => {
+        let data;
         try {
-            const data = JSON.parse(event.data);
-            const context = SillyTavern.getContext();
+            data = JSON.parse(event.data);
+            let context = SillyTavern.getContext();
 
             if (data.type === 'user_message') {
-                // ... (普通聊天逻辑，保持不变) ...
                 console.log('Telegram Bridge: 收到用户消息。', data);
 
-                const userMessage = { name: 'You', is_user: true, is_name: true, send_date: Date.now(), mes: data.text };
+                const userMessage = {
+                    name: 'You',
+                    is_user: true,
+                    is_name: true,
+                    send_date: Date.now(),
+                    mes: data.text
+                };
                 context.chat.push(userMessage);
-                eventSource.emit(event_types.CHAT_CHANGED, context.chat);
-                console.log('Telegram Bridge: 添加用户消息。正在生成回复...');
+                SillyTavern.getContext().addOneMessage(userMessage);
 
-                // 发送"输入中"状态
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     ws.send(JSON.stringify({ type: 'typing_action', chatId: data.chatId }));
                 }
 
-                const aiReplyText = await generateQuietPrompt(null, false);
+                const aiReplyText = await generateQuietPrompt(data.text, false, false);
 
-                const characterName = context.characters[context.characterId].name;
-                const aiMessage = { name: characterName, is_user: false, is_name: true, send_date: Date.now(), mes: aiReplyText };
-                context.chat.push(aiMessage);
-                eventSource.emit(event_types.CHAT_CHANGED, context.chat);
-                console.log(`Telegram Bridge: 为 "${characterName}" 添加AI回复。`);
+                if (aiReplyText) {
+                    context = SillyTavern.getContext();
+                    const characterName = context.characters[context.characterId].name;
+                    const aiMessage = {
+                        name: characterName,
+                        is_user: false,
+                        is_name: true,
+                        send_date: Date.now(),
+                        mes: aiReplyText
+                    };
+                    context.chat.push(aiMessage);
+                    SillyTavern.getContext().addOneMessage(aiMessage);
 
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({ type: 'ai_reply', chatId: data.chatId, text: aiReplyText }));
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ type: 'ai_reply', chatId: data.chatId, text: aiReplyText }));
+                    }
+
+                    saveChatDebounced();
+                } else {
+                    console.error("Telegram Bridge: AI回复为空，不发送。");
                 }
-                saveChatDebounced();
                 return;
             }
 
-            // 处理服务器发来的系统命令
             if (data.type === 'system_command') {
                 console.log('Telegram Bridge: 收到系统命令', data);
-
-                // 只处理刷新UI的命令
                 if (data.command === 'reload_ui_only') {
                     console.log('Telegram Bridge: 正在刷新UI...');
                     setTimeout(reloadPage, 500);
                 }
-
                 return;
             }
 
             if (data.type === 'command_request') {
                 console.log('Telegram Bridge: 处理命令。', data);
-                
-                // 发送"输入中"状态
+
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     ws.send(JSON.stringify({ type: 'typing_action', chatId: data.chatId }));
                 }
-                
-                let replyText = `未知命令: /${data.command}。 使用 /help 查看所有命令。`; // 更新了未知命令的提示
-                const { executeSlashCommandsWithOptions, openCharacterChat } = context;
+
+                let replyText = `未知命令: /${data.command}。 使用 /help 查看所有命令。`;
+                const { executeSlashCommandsWithOptions, openCharacterChat } = SillyTavern.getContext();
 
                 switch (data.command) {
-                    // --- 新增的 /help 命令 ---
                     case 'help':
                         replyText = `SillyTavern Telegram Bridge 命令：\n\n`;
                         replyText += `聊天管理\n`;
@@ -149,20 +154,17 @@ function connect() {
                         replyText += `帮助\n`;
                         replyText += `/help - 显示此帮助信息。`;
                         break;
-                    // --- 现有命令保持不变 ---
                     case 'new':
                         await executeSlashCommandsWithOptions('/newchat');
                         replyText = '新的聊天已经开始。';
                         break;
-
                     case 'listchars': {
-                        const characters = context.characters.slice(1);
+                        const characters = SillyTavern.getContext().characters.slice(1);
                         if (characters.length > 0) {
                             replyText = '可用角色列表：\n\n';
                             characters.forEach((char, index) => {
                                 replyText += `${index + 1}. /switchchar_${index + 1} - ${char.name}\n`;
                             });
-                            // 添加使用说明
                             replyText += '\n使用 /switchchar_数字 或 /switchchar 角色名称 来切换角色';
                         } else {
                             replyText = '没有找到可用角色。';
@@ -176,31 +178,70 @@ function connect() {
                             break;
                         }
                         const targetName = data.args.join(' ');
-                        const result = await executeSlashCommandsWithOptions(`/char "${targetName}"`);
+                        await executeSlashCommandsWithOptions(`/char "${targetName}"`);
 
-                        if (result && typeof result === 'string') {
-                            replyText = result;
+                        await new Promise(resolve => setTimeout(resolve, 200));
+                        const newContext = SillyTavern.getContext();
+                        const currentCharacter = newContext.characters[newContext.characterId];
+                        if (currentCharacter && currentCharacter.name === targetName) {
+                            replyText = `已成功切换到角色 "${targetName}"。`;
                         } else {
-                            replyText = `已尝试切换到角色 "${targetName}"。`;
+                            replyText = `已发送切换到角色 "${targetName}" 的命令。`;
                         }
                         break;
                     }
-
-                    // 使用正则表达式匹配任意序号的switchchar命令
+                    case 'listchats': {
+                        // 【修改】: 直接调用导入的 getPastCharacterChats
+                        const currentContext = SillyTavern.getContext();
+                        if (currentContext.characterId === undefined) {
+                            replyText = '请先选择一个角色。';
+                            break;
+                        }
+                        const chatFiles = await getPastCharacterChats(currentContext.characterId);
+                        if (chatFiles.length > 0) {
+                            replyText = '当前角色的聊天记录：\n\n';
+                            chatFiles.forEach((chat, index) => {
+                                const chatName = chat.file_name.replace('.jsonl', '');
+                                replyText += `${index + 1}. /switchchat_${index + 1} - ${chatName}\n`;
+                            });
+                            replyText += '\n使用 /switchchat_数字 或 /switchchat 聊天名称 来切换聊天';
+                        } else {
+                            replyText = '当前角色没有任何聊天记录。';
+                        }
+                        break;
+                    }
+                    case 'switchchat': {
+                        if (data.args.length === 0) {
+                            replyText = '请提供聊天记录名称。用法： /switchchat <聊天记录名称>';
+                            break;
+                        }
+                        const targetChatFile = `${data.args.join(' ')}`;
+                        try {
+                            await openCharacterChat(targetChatFile);
+                            replyText = `已加载聊天记录： ${data.args.join(' ')}`;
+                        } catch (err) {
+                            console.error(err);
+                            replyText = `加载聊天记录 "${data.args.join(' ')}" 失败。请确认名称完全正确。`;
+                        }
+                        break;
+                    }
                     default: {
-                        // 检查是否是switchchar_数字格式
                         const charMatch = data.command.match(/^switchchar_(\d+)$/);
                         if (charMatch) {
                             const index = parseInt(charMatch[1]) - 1;
-                            const characters = context.characters.slice(1);
+                            const characters = SillyTavern.getContext().characters.slice(1);
                             if (index >= 0 && index < characters.length) {
                                 const targetChar = characters[index];
-                                const result = await executeSlashCommandsWithOptions(`/char "${targetChar.name}"`);
+                                await executeSlashCommandsWithOptions(`/char "${targetChar.name}"`);
 
-                                if (result && typeof result === 'string') {
-                                    replyText = result;
-                                } else {
+                                await new Promise(resolve => setTimeout(resolve, 200));
+                                const newContext = SillyTavern.getContext();
+                                const currentCharacter = newContext.characters[newContext.characterId];
+
+                                if (currentCharacter && currentCharacter.name === targetChar.name) {
                                     replyText = `已切换到角色 "${targetChar.name}"。`;
+                                } else {
+                                    replyText = `尝试切换到角色 "${targetChar.name}" 失败。`;
                                 }
                             } else {
                                 replyText = `无效的角色序号: ${index + 1}。请使用 /listchars 查看可用角色。`;
@@ -208,15 +249,16 @@ function connect() {
                             break;
                         }
 
-                        // 检查是否是switchchat_数字格式
                         const chatMatch = data.command.match(/^switchchat_(\d+)$/);
                         if (chatMatch) {
-                            if (context.characterId === undefined) {
+                            const currentContext = SillyTavern.getContext();
+                            if (currentContext.characterId === undefined) {
                                 replyText = '请先选择一个角色。';
                                 break;
                             }
                             const index = parseInt(chatMatch[1]) - 1;
-                            const chatFiles = await getPastCharacterChats(context.characterId);
+                            // 【修改】: 直接调用导入的 getPastCharacterChats
+                            const chatFiles = await getPastCharacterChats(currentContext.characterId);
 
                             if (index >= 0 && index < chatFiles.length) {
                                 const targetChat = chatFiles[index];
@@ -233,51 +275,9 @@ function connect() {
                             }
                             break;
                         }
-
-                        // 如果不是上述任何一种命令格式，保持默认的未知命令提示
-                        if (replyText === `未知命令: /${data.command}。 使用 /help 查看所有命令。`) {
-                            break;
-                        }
-                    }
-
-                    case 'listchats': {
-                        if (context.characterId === undefined) {
-                            replyText = '请先选择一个角色。';
-                            break;
-                        }
-                        const chatFiles = await getPastCharacterChats(context.characterId);
-                        if (chatFiles.length > 0) {
-                            replyText = '当前角色的聊天记录：\n\n';
-                            chatFiles.forEach((chat, index) => {
-                                const chatName = chat.file_name.replace('.jsonl', '');
-                                replyText += `${index + 1}. /switchchat_${index + 1} - ${chatName}\n`;
-                            });
-                            // 添加使用说明
-                            replyText += '\n使用 /switchchat_数字 或 /switchchat 聊天名称 来切换聊天';
-                        } else {
-                            replyText = '当前角色没有任何聊天记录。';
-                        }
-                        break;
-                    }
-
-                    case 'switchchat': {
-                        if (data.args.length === 0) {
-                            replyText = '请提供聊天记录名称。用法： /switchchat <聊天记录名称>';
-                            break;
-                        }
-                        const targetChatFile = `${data.args.join(' ')}`;
-                        try {
-                            await openCharacterChat(targetChatFile);
-                            replyText = `已加载聊天记录： ${data.args.join(' ')}`;
-                        } catch (err) {
-                            console.error(err);
-                            replyText = `加载聊天记录 "${data.args.join(' ')}" 失败。请确认名称完全正确。`;
-                        }
-                        break;
                     }
                 }
 
-                // 将命令执行结果回复给用户
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     ws.send(JSON.stringify({ type: 'ai_reply', chatId: data.chatId, text: replyText }));
                 }
@@ -311,10 +311,7 @@ function disconnect() {
 
 // 扩展加载时执行的函数
 jQuery(async () => {
-    // 调试信息，确认代码块被执行
     console.log('正在尝试加载 Telegram Connector 设置 UI...');
-
-    // 加载设置UI (已修正URL路径)
     try {
         const settingsHtml = await $.get(`/scripts/extensions/third-party/${MODULE_NAME}/settings.html`);
         $('#extensions_settings').append(settingsHtml);
@@ -324,7 +321,6 @@ jQuery(async () => {
         $('#telegram_bridge_url').val(settings.bridgeUrl);
         $('#telegram_auto_connect').prop('checked', settings.autoConnect);
 
-        // 绑定事件
         $('#telegram_bridge_url').on('input', () => {
             settings.bridgeUrl = $('#telegram_bridge_url').val();
             saveSettingsDebounced();
@@ -338,7 +334,6 @@ jQuery(async () => {
         $('#telegram_connect_button').on('click', connect);
         $('#telegram_disconnect_button').on('click', disconnect);
 
-        // 如果启用了自动连接，则自动连接
         if (settings.autoConnect) {
             console.log('Telegram Bridge: 自动连接已启用，正在连接...');
             connect();
@@ -346,8 +341,6 @@ jQuery(async () => {
 
     } catch (error) {
         console.error('加载 Telegram Connector 设置 HTML 失败。', error);
-        // 在这里可以添加一些用户友好的错误提示到UI上
     }
-
     console.log('Telegram Connector 扩展已加载。');
 });
