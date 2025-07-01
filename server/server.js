@@ -90,19 +90,6 @@ if (token === 'TOKEN' || token === 'YOUR_TELEGRAM_BOT_TOKEN_HERE') {
 const bot = new TelegramBot(token, { polling: true });
 console.log('Telegram Bot已启动...');
 
-// 存储bot的用户名和ID
-let botUsername = '';
-let botId = null;
-
-// 获取bot信息
-bot.getMe().then(me => {
-    botUsername = me.username;
-    botId = me.id;
-    console.log(`Bot信息: @${botUsername} (ID: ${botId})`);
-}).catch(error => {
-    console.error('获取Bot信息失败:', error);
-});
-
 // 初始化WebSocket服务器
 const wss = new WebSocket.Server({ port: wssPort });
 console.log(`WebSocket服务器正在监听端口 ${wssPort}...`);
@@ -369,26 +356,6 @@ bot.on('message', (msg) => {
     const text = msg.text;
 
     if (!text) return; // 忽略非文本消息
-
-    // 检查是否被@提及
-    const isBotMentioned = msg.entities && msg.entities.some(entity =>
-        entity.type === 'mention' && text.substring(entity.offset, entity.offset + entity.length) === '@' + botUsername
-    );
-
-    // 检查消息是否是回复bot的消息
-    const isReplyToBot = msg.reply_to_message && msg.reply_to_message.from && msg.reply_to_message.from.id === botId;
-
-    // 检查是否是私聊消息
-    const isPrivateChat = msg.chat.type === 'private';
-
-    // 只处理以下情况的消息：
-    // 1. 私聊消息
-    // 2. 回复bot的消息
-    // 3. @提及bot的消息
-    // 4. 系统命令（以/开头）
-    if (!isPrivateChat && !isReplyToBot && !isBotMentioned && !text.startsWith('/')) {
-        return; // 忽略不满足条件的群聊消息
-    }
 
     // 检查是否是系统命令
     if (text.startsWith('/')) {
