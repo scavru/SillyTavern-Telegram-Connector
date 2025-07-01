@@ -85,6 +85,11 @@ function connect() {
                 eventSource.emit(event_types.CHAT_CHANGED, context.chat);
                 console.log('Telegram Bridge: 添加用户消息。正在生成回复...');
 
+                // 发送"输入中"状态
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'typing_action', chatId: data.chatId }));
+                }
+
                 const aiReplyText = await generateQuietPrompt(null, false);
 
                 const characterName = context.characters[context.characterId].name;
@@ -115,6 +120,12 @@ function connect() {
 
             if (data.type === 'command_request') {
                 console.log('Telegram Bridge: 处理命令。', data);
+                
+                // 发送"输入中"状态
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'typing_action', chatId: data.chatId }));
+                }
+                
                 let replyText = `未知命令: /${data.command}。 使用 /help 查看所有命令。`; // 更新了未知命令的提示
                 const { executeSlashCommandsWithOptions, openCharacterChat } = context;
 
@@ -123,20 +134,20 @@ function connect() {
                     case 'help':
                         replyText = `SillyTavern Telegram Bridge 命令：\n\n`;
                         replyText += `聊天管理\n`;
-                        replyText += `  /new - 开始与当前角色的新聊天。\n`;
-                        replyText += `  /listchats - 列出当前角色的所有已保存的聊天记录。\n`;
-                        replyText += `  /switchchat <chat_name> - 加载特定的聊天记录。\n`;
-                        replyText += `  /switchchat_<序号> - 通过序号加载聊天记录。\n\n`;
+                        replyText += `/new - 开始与当前角色的新聊天。\n`;
+                        replyText += `/listchats - 列出当前角色的所有已保存的聊天记录。\n`;
+                        replyText += `/switchchat <chat_name> - 加载特定的聊天记录。\n`;
+                        replyText += `/switchchat_<序号> - 通过序号加载聊天记录。\n\n`;
                         replyText += `角色管理\n`;
-                        replyText += `  /listchars - 列出所有可用角色。\n`;
-                        replyText += `  /switchchar <char_name> - 切换到指定角色。\n`;
-                        replyText += `  /switchchar_<序号> - 通过序号切换角色。\n\n`;
+                        replyText += `/listchars - 列出所有可用角色。\n`;
+                        replyText += `/switchchar <char_name> - 切换到指定角色。\n`;
+                        replyText += `/switchchar_<序号> - 通过序号切换角色。\n\n`;
                         replyText += `系统管理\n`;
-                        replyText += `  /reload - 重载插件的服务器端组件并刷新ST网页。\n`;
-                        replyText += `  /restart - 刷新ST网页并重启插件的服务器端组件。\n`;
-                        replyText += `  /exit - 退出插件的服务器端组件。\n\n`;
+                        replyText += `/reload - 重载插件的服务器端组件并刷新ST网页。\n`;
+                        replyText += `/restart - 刷新ST网页并重启插件的服务器端组件。\n`;
+                        replyText += `/exit - 退出插件的服务器端组件。\n\n`;
                         replyText += `帮助\n`;
-                        replyText += `  /help - 显示此帮助信息。`;
+                        replyText += `/help - 显示此帮助信息。`;
                         break;
                     // --- 现有命令保持不变 ---
                     case 'new':

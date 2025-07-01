@@ -311,6 +311,11 @@ wss.on('connection', ws => {
             } else if (data.type === 'system_command' && data.command) {
                 // 处理系统命令
                 handleSystemCommand(data.command, data.chatId);
+            } else if (data.type === 'typing_action' && data.chatId) {
+                // 处理"输入中"状态
+                console.log(`显示"输入中"状态给Telegram用户 ${data.chatId}`);
+                bot.sendChatAction(data.chatId, 'typing')
+                    .catch(error => console.error('发送"输入中"状态失败:', error));
             }
         } catch (error) {
             console.error('处理SillyTavern消息时出错:', error);
