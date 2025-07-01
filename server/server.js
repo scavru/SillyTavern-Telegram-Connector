@@ -96,32 +96,7 @@ console.log(`WebSocket服务器正在监听端口 ${wssPort}...`);
 
 let sillyTavernClient = null; // 用于存储连接的SillyTavern扩展客户端
 
-// 流式消息管理器
-const streamingMessages = new Map();
-
-// 节流函数
-function throttle(func, limit) {
-    let inThrottle;
-    let lastFunc;
-    return function () {
-        const context = this;
-        const args = arguments;
-        if (!inThrottle) {
-            func.apply(context, args);
-            inThrottle = true;
-            setTimeout(() => {
-                inThrottle = false;
-                if (lastFunc) {
-                    lastFunc.apply(context, args);
-                    lastFunc = null;
-                }
-            }, limit);
-        } else {
-            lastFunc = func;
-        }
-    };
-}
-
+// 系统命令处理函数
 function handleSystemCommand(command, chatId) {
     console.log(`执行系统命令: ${command}`);
 
@@ -263,14 +238,64 @@ function exitServer(chatId) {
 
     // 关闭WebSocket服务器
     if (wss) {
-        wss.close(() => {
-            bot.stopPolling().finally(finalExit);
-        });
+        try {
+            wss.close((err) => {
+                if (err) {
+                    console.error('关闭WebSocket服务器时出错:', err);
+                } else {
+                    console.log('WebSocket服务器已关闭');
+                }
+
+                // 无论成功与否，继续尝试停止Telegram Bot
+                try {
+                    bot.stopPolling()
+                        .then(() => {
+                            console.log('Telegram Bot已停止');
+                            // 不再发送最终通知，直接退出
+                            finalExit();
+                        })
+                        .catch(err => {
+                            console.error('停止Telegram Bot时出错:', err);
+                            finalExit();
+                        });
+                } catch (botError) {
+                    console.error('调用bot.stopPolling时出错:', botError);
+                    finalExit();
+                }
+            });
+        } catch (wssError) {
+            console.error('调用wss.close时出错:', wssError);
+
+            // WebSocket关闭失败，继续尝试停止Telegram Bot
+            try {
+                bot.stopPolling()
+                    .finally(() => {
+                        // 不再发送错误通知，直接退出
+                        finalExit();
+                    });
+            } catch (e) {
+                finalExit();
+            }
+        }
     } else {
-        bot.stopPolling().finally(finalExit);
+        // 如果WebSocket服务器不存在，直接停止Telegram Bot
+        try {
+            bot.stopPolling()
+                .then(() => {
+                    console.log('Telegram Bot已停止');
+                    // 不再发送最终通知，直接退出
+                    finalExit();
+                })
+                .catch(err => {
+                    console.error('停止Telegram Bot时出错:', err);
+                    finalExit();
+                });
+        } catch (e) {
+            console.error('调用bot.stopPolling时出错:', e);
+            finalExit();
+        }
     }
 }
-
 
 wss.on('connection', ws => {
     console.log('SillyTavern扩展已连接！');
@@ -280,86 +305,18 @@ wss.on('connection', ws => {
         // 从SillyTavern扩展收到的消息 (AI的回复)
         try {
             const data = JSON.parse(message);
-
-            switch (data.type) {
-                case 'ai_reply':
-                    if (data.chatId && data.text) {
-                        console.log(`收到完整AI回复，发送至Telegram用户 ${data.chatId}`);
-                        bot.sendMessage(data.chatId, data.text);
-                    }
-                    break;
-                case 'stream_start':
-                    if (data.chatId) {
-                        console.log(`开始为 ${data.chatId} 流式传输消息`);
-                        bot.sendMessage(data.chatId, '思考中...').then(sentMessage => {
-                            const messageKey = `${data.chatId}_${data.streamId}`;
-                            const throttledEdit = throttle((text) => {
-                                // 只有当文本改变时才编辑
-                                if (sentMessage.text !== text && text.trim() !== '') {
-                                    bot.editMessageText(text, {
-                                        chat_id: sentMessage.chat.id,
-                                        message_id: sentMessage.message_id,
-                                    }).catch(err => {
-                                        if (err.response && err.response.body.description.includes("message is not modified")) {
-                                            // 忽略这个特定的、无害的错误
-                                        } else {
-                                            console.error('编辑消息失败:', err.response ? err.response.body : err);
-                                        }
-                                    });
-                                }
-                            }, 1200); // 每 1.2 秒最多编辑一次
-
-                            streamingMessages.set(messageKey, {
-                                messageId: sentMessage.message_id,
-                                fullText: '',
-                                throttledEdit: throttledEdit,
-                            });
-                        });
-                    }
-                    break;
-                case 'stream_chunk':
-                    if (data.chatId) {
-                        const messageKey = `${data.chatId}_${data.streamId}`;
-                        const stream = streamingMessages.get(messageKey);
-                        if (stream) {
-                            stream.fullText = data.text;
-                            stream.throttledEdit(stream.fullText || '...');
-                        }
-                    }
-                    break;
-                case 'stream_end':
-                    if (data.chatId) {
-                        const messageKey = `${data.chatId}_${data.streamId}`;
-                        const stream = streamingMessages.get(messageKey);
-                        if (stream) {
-                            const finalText = data.text || stream.fullText || '...';
-                            if (stream.fullText !== finalText) { // 确保最终内容和上次节流发送的内容不同
-                                bot.editMessageText(finalText, {
-                                    chat_id: data.chatId,
-                                    message_id: stream.messageId,
-                                }).catch(err => {
-                                    if (err.response && err.response.body.description.includes("message is not modified")) {
-                                        // 忽略
-                                    } else {
-                                        console.error('编辑最终消息失败:', err.response ? err.response.body : err);
-                                    }
-                                });
-                            }
-                            streamingMessages.delete(messageKey);
-                        }
-                    }
-                    break;
-                case 'system_command':
-                    if (data.command) handleSystemCommand(data.command, data.chatId);
-                    break;
-                case 'typing_action':
-                    if (data.chatId) {
-                        bot.sendChatAction(data.chatId, 'typing')
-                            .catch(error => console.error('发送"输入中"状态失败:', error));
-                    }
-                    break;
+            if (data.type === 'ai_reply' && data.chatId) {
+                console.log(`收到AI回复，准备发送至Telegram用户 ${data.chatId}`);
+                bot.sendMessage(data.chatId, data.text);
+            } else if (data.type === 'system_command' && data.command) {
+                // 处理系统命令
+                handleSystemCommand(data.command, data.chatId);
+            } else if (data.type === 'typing_action' && data.chatId) {
+                // 处理"输入中"状态
+                console.log(`显示"输入中"状态给Telegram用户 ${data.chatId}`);
+                bot.sendChatAction(data.chatId, 'typing')
+                    .catch(error => console.error('发送"输入中"状态失败:', error));
             }
-
         } catch (error) {
             console.error('处理SillyTavern消息时出错:', error);
         }
@@ -404,34 +361,51 @@ bot.on('message', (msg) => {
     if (text.startsWith('/')) {
         const parts = text.slice(1).trim().split(/\s+/); // 分割命令和参数
         const command = parts[0].toLowerCase();
+        const args = parts.slice(1);
 
         // 直接处理系统命令
-        if (['reload', 'restart', 'exit'].includes(command)) {
+        if (command === 'reload' || command === 'restart' || command === 'exit') {
             console.log(`从Telegram用户 ${chatId} 收到系统命令: "${text}"`);
 
             // 先发送响应，然后再处理命令
             let responseMessage = '';
             switch (command) {
-                case 'reload': responseMessage = '正在重载服务器端组件...'; break;
-                case 'restart': responseMessage = '正在重启服务器端组件...'; break;
-                case 'exit': responseMessage = '正在关闭服务器端组件...'; break;
+                case 'reload':
+                    responseMessage = '正在重载服务器端组件...';
+                    break;
+                case 'restart':
+                    responseMessage = '正在重启服务器端组件...';
+                    break;
+                case 'exit':
+                    responseMessage = '正在关闭服务器端组件...';
+                    break;
             }
 
             // 发送响应并等待发送完成后再执行命令
-            bot.sendMessage(chatId, responseMessage).then(() => {
-                console.log(`已向用户 ${chatId} 发送响应: "${responseMessage}"`);
+            bot.sendMessage(chatId, responseMessage)
+                .then(() => {
+                    console.log(`已向用户 ${chatId} 发送响应: "${responseMessage}"`);
 
-                // 如果是reload命令且ST连接正常，需要通知ST刷新页面
-                if (command === 'reload' && sillyTavernClient && sillyTavernClient.readyState === WebSocket.OPEN) {
-                    sillyTavernClient.send(JSON.stringify({ type: 'system_command', command: 'reload_ui_only', chatId: chatId }));
-                }
-                // 延迟一小段时间再执行命令，确保消息已发送
-                setTimeout(() => handleSystemCommand(command, chatId), 500);
-            }).catch(error => {
-                console.error('发送响应消息失败:', error);
-                // 即使发送失败也执行命令
-                handleSystemCommand(command, chatId);
-            });
+                    // 如果是reload命令且ST连接正常，需要通知ST刷新页面
+                    if (command === 'reload' && sillyTavernClient && sillyTavernClient.readyState === WebSocket.OPEN) {
+                        sillyTavernClient.send(JSON.stringify({
+                            type: 'system_command',
+                            command: 'reload_ui_only',
+                            chatId: chatId
+                        }));
+                    }
+
+                    // 延迟一小段时间再执行命令，确保消息已发送
+                    setTimeout(() => {
+                        // 直接在服务器端执行系统命令
+                        handleSystemCommand(command, chatId);
+                    }, 500);
+                })
+                .catch(error => {
+                    console.error('发送响应消息失败:', error);
+                    // 即使发送失败也执行命令
+                    handleSystemCommand(command, chatId);
+                });
 
             return; // 不再继续处理
         }
@@ -445,11 +419,21 @@ bot.on('message', (msg) => {
             const parts = text.slice(1).trim().split(/\s+/); // 分割命令和参数
             const command = parts[0].toLowerCase();
             const args = parts.slice(1);
-            payload = JSON.stringify({ type: 'command_request', chatId, command, args });
+
+            payload = JSON.stringify({
+                type: 'command_request',
+                chatId: chatId,
+                command: command,
+                args: args
+            });
         } else {
             // --- 这是普通消息处理逻辑 (保持不变) ---
             console.log(`从Telegram用户 ${chatId} 收到消息: "${text}"`);
-            payload = JSON.stringify({ type: 'user_message', chatId, text });
+            payload = JSON.stringify({
+                type: 'user_message',
+                chatId: chatId,
+                text: text,
+            });
         }
         sillyTavernClient.send(payload);
     } else {
