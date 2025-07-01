@@ -3,21 +3,19 @@
 // 只从 getContext() 解构出稳定的、用于读取设置的对象
 const {
     extensionSettings,
-    // 不再从 getContext() 解构函数，而是通过直接导入来确保稳定性
 } = SillyTavern.getContext();
 
-// 从 script.js 导入所有需要的公共API函数，这是最稳定和推荐的方式
+// 从 script.js 导入所有需要的公共API函数
 import {
-    generateQuietPrompt,
-    saveChatDebounced,
     eventSource,
     event_types,
     getPastCharacterChats,
-    sendMessageAsUser,        // <-- 用于发送用户消息
-    saveReply,                // <-- 用于保存AI回复
-    doNewChat,                // <-- 用于创建新聊天
-    selectCharacterById,      // <-- 用于通过ID切换角色
-    openCharacterChat,        // <-- 用于加载指定聊天
+    sendMessageAsUser,
+    doNewChat,
+    selectCharacterById,
+    openCharacterChat,
+    Generate,
+    setExternalAbortController,
 } from "../../../../script.js";
 
 const MODULE_NAME = 'SillyTavern-Telegram-Connector';
@@ -77,40 +75,52 @@ function connect() {
         try {
             data = JSON.parse(event.data);
 
-            // --- 用户消息处理 ---
+            // --- 用户消息处理（流式版本） ---
             if (data.type === 'user_message') {
                 console.log('Telegram Bridge: 收到用户消息。', data);
 
-                // 使用 sendMessageAsUser 来正确添加用户消息到聊天中。
-                // 这会触发所有相关的SillyTavern事件和UI更新，并自动处理聊天记录的保存。
-                // 直接操作 `context.chat.push()` 是不安全的，会绕过核心逻辑。
+                // 1. 将用户消息添加到SillyTavern
                 await sendMessageAsUser(data.text);
 
-                // 发送“输入中”状态
+                // 2. 立即向Telegram发送“输入中”状态
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     ws.send(JSON.stringify({ type: 'typing_action', chatId: data.chatId }));
                 }
 
-                // 生成AI回复
-                const aiReplyText = await generateQuietPrompt(data.text, false, false);
-
-                if (aiReplyText) {
-                    // 使用 saveReply 来正确保存AI的回复。
-                    // 这是添加AI消息到聊天记录的标准方法，同样能确保所有内部状态和UI都正确更新。
-                    await saveReply({
-                        type: 'normal',
-                        getMessage: aiReplyText,
-                    });
-
-                    // 将AI回复发送回Telegram
+                // 3. 设置流式传输的回调
+                const streamCallback = (cumulativeText) => {
+                    // 将每个文本块通过WebSocket发送到服务端
                     if (ws && ws.readyState === WebSocket.OPEN) {
-                        ws.send(JSON.stringify({ type: 'ai_reply', chatId: data.chatId, text: aiReplyText }));
+                        ws.send(JSON.stringify({
+                            type: 'stream_chunk',
+                            chatId: data.chatId,
+                            text: cumulativeText,
+                        }));
                     }
+                };
+                eventSource.on(event_types.STREAM_TOKEN_RECEIVED, streamCallback);
 
-                    // saveChatDebounced() 会在 sendMessageAsUser 和 saveReply 内部被自动调用，所以这里不再需要手动调用。
-                } else {
-                    console.error("Telegram Bridge: AI回复为空，不发送。");
+                // 4. 定义一个清理函数
+                const cleanup = () => {
+                    eventSource.removeListener(event_types.STREAM_TOKEN_RECEIVED, streamCallback);
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ type: 'stream_end', chatId: data.chatId }));
+                    }
+                };
+
+                // 5. 监听生成结束事件，确保无论成功与否都执行清理
+                eventSource.once(event_types.GENERATION_ENDED, cleanup);
+
+                // 6. 触发SillyTavern的标准生成流程
+                try {
+                    const abortController = new AbortController();
+                    setExternalAbortController(abortController);
+                    await Generate('normal', { signal: abortController.signal });
+                } catch (error) {
+                    console.error("SillyTavern Generate() error:", error);
+                    cleanup(); // 即使生成出错，也要确保清理
                 }
+
                 return;
             }
 
@@ -134,7 +144,6 @@ function connect() {
 
                 let replyText = `未知命令: /${data.command}。 使用 /help 查看所有命令。`;
 
-                // 在处理命令前获取最新的上下文
                 const context = SillyTavern.getContext();
 
                 switch (data.command) {
@@ -157,13 +166,11 @@ function connect() {
                         replyText += `/help - 显示此帮助信息。`;
                         break;
                     case 'new':
-                        // 使用公共API `doNewChat` 代替不稳定的内部命令。
                         await doNewChat({ deleteCurrentChat: false });
                         replyText = '新的聊天已经开始。';
                         break;
                     case 'listchars': {
-                        // context.characters 是一个安全的只读操作。
-                        const characters = context.characters.slice(1); // 假设第一个总是系统角色
+                        const characters = context.characters.slice(1);
                         if (characters.length > 0) {
                             replyText = '可用角色列表：\n\n';
                             characters.forEach((char, index) => {
@@ -186,7 +193,6 @@ function connect() {
 
                         if (targetChar) {
                             const charIndex = characters.indexOf(targetChar);
-                            // 使用公共API `selectCharacterById` 切换角色。
                             await selectCharacterById(charIndex);
                             replyText = `已成功切换到角色 "${targetName}"。`;
                         } else {
@@ -199,7 +205,6 @@ function connect() {
                             replyText = '请先选择一个角色。';
                             break;
                         }
-                        // 直接调用导入的 getPastCharacterChats。
                         const chatFiles = await getPastCharacterChats(context.characterId);
                         if (chatFiles.length > 0) {
                             replyText = '当前角色的聊天记录：\n\n';
@@ -220,7 +225,6 @@ function connect() {
                         }
                         const targetChatFile = `${data.args.join(' ')}`;
                         try {
-                            // 使用导入的 openCharacterChat 函数。
                             await openCharacterChat(targetChatFile);
                             replyText = `已加载聊天记录： ${targetChatFile}`;
                         } catch (err) {
@@ -237,7 +241,6 @@ function connect() {
                             if (index >= 0 && index < characters.length) {
                                 const targetChar = characters[index];
                                 const charIndex = context.characters.indexOf(targetChar);
-                                // 使用公共API `selectCharacterById`。
                                 await selectCharacterById(charIndex);
                                 replyText = `已切换到角色 "${targetChar.name}"。`;
                             } else {
@@ -253,14 +256,12 @@ function connect() {
                                 break;
                             }
                             const index = parseInt(chatMatch[1]) - 1;
-                            // 直接调用导入的 getPastCharacterChats。
                             const chatFiles = await getPastCharacterChats(context.characterId);
 
                             if (index >= 0 && index < chatFiles.length) {
                                 const targetChat = chatFiles[index];
                                 const chatName = targetChat.file_name.replace('.jsonl', '');
                                 try {
-                                    // 使用导入的 openCharacterChat 函数。
                                     await openCharacterChat(chatName);
                                     replyText = `已加载聊天记录： ${chatName}`;
                                 } catch (err) {
@@ -319,13 +320,15 @@ jQuery(async () => {
         $('#telegram_auto_connect').prop('checked', settings.autoConnect);
 
         $('#telegram_bridge_url').on('input', () => {
+            const settings = getSettings();
             settings.bridgeUrl = $('#telegram_bridge_url').val();
-            saveSettingsDebounced();
+            // SillyTavern's saveSettingsDebounced will handle saving automatically
         });
 
         $('#telegram_auto_connect').on('change', function () {
+            const settings = getSettings();
             settings.autoConnect = $(this).prop('checked');
-            saveSettingsDebounced();
+            // SillyTavern's saveSettingsDebounced will handle saving automatically
         });
 
         $('#telegram_connect_button').on('click', connect);
