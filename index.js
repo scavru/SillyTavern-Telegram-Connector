@@ -1,10 +1,13 @@
 // index.js
 
-// 只从 getContext() 解构出稳定的、用于读取设置的对象
+// 只解构 getContext() 返回的对象中确实存在的属性
 const {
     extensionSettings,
     deleteLastMessage, // 导入删除最后一条消息的函数
 } = SillyTavern.getContext();
+
+// getContext 函数是全局 SillyTavern 对象的一部分，我们不需要从别处导入它
+// 在需要时直接调用 SillyTavern.getContext() 即可
 
 // 从 script.js 导入所有需要的公共API函数
 import {
@@ -26,6 +29,7 @@ const DEFAULT_SETTINGS = {
 };
 
 let ws = null; // WebSocket实例
+let lastProcessedChatId = null; // 用于存储最后处理过的Telegram chatId
 
 // --- 工具函数 ---
 function getSettings() {
@@ -80,6 +84,9 @@ function connect() {
             if (data.type === 'user_message') {
                 console.log('Telegram Bridge: 收到用户消息。', data);
 
+                // 存储当前处理的chatId
+                lastProcessedChatId = data.chatId;
+
                 // 1. 将用户消息添加到SillyTavern
                 await sendMessageAsUser(data.text);
 
@@ -113,6 +120,7 @@ function connect() {
                 };
 
                 // 5. 监听生成结束事件，确保无论成功与否都执行清理
+                // 注意: 我们现在使用once来确保这个监听器只执行一次，避免干扰后续的全局监听器
                 eventSource.once(event_types.GENERATION_ENDED, cleanup);
 
                 // 6. 触发SillyTavern的生成流程，并用try...catch包裹
@@ -165,6 +173,7 @@ function connect() {
 
                 let replyText = `未知命令: /${data.command}。 使用 /help 查看所有命令。`;
 
+                // 直接调用全局的 SillyTavern.getContext()
                 const context = SillyTavern.getContext();
 
                 switch (data.command) {
@@ -364,4 +373,43 @@ jQuery(async () => {
         console.error('加载 Telegram Connector 设置 HTML 失败。', error);
     }
     console.log('Telegram Connector 扩展已加载。');
+});
+
+// 全局事件监听器，用于最终消息更新
+eventSource.on(event_types.GENERATION_ENDED, (lastMessageIdInChatArray) => {
+    // 确保WebSocket已连接，并且我们有一个有效的chatId来发送更新
+    if (!ws || ws.readyState !== WebSocket.OPEN || !lastProcessedChatId) {
+        return;
+    }
+
+    const lastMessageIndex = lastMessageIdInChatArray - 1;
+    if (lastMessageIndex < 0) return;
+
+    // 延迟以确保DOM更新完成
+    setTimeout(() => {
+        // 直接调用全局的 SillyTavern.getContext()
+        const context = SillyTavern.getContext();
+        const lastMessage = context.chat[lastMessageIndex];
+
+        // 确认这是我们刚刚通过Telegram触发的AI回复
+        if (lastMessage && !lastMessage.is_user && !lastMessage.is_system) {
+            const messageElement = $(`#chat .mes[mesid="${lastMessageIndex}"]`);
+
+            if (messageElement.length > 0) {
+                // 使用 .html() 而不是 .text() 来保留换行等格式
+                const renderedText = messageElement.find('.mes_text').text();
+
+                console.log(`Telegram Bridge: 捕获到最终渲染文本，准备发送更新到 chatId: ${lastProcessedChatId}`);
+
+                ws.send(JSON.stringify({
+                    type: 'final_message_update',
+                    chatId: lastProcessedChatId,
+                    text: renderedText,
+                }));
+
+                // 重置chatId，避免意外更新其他用户的消息
+                lastProcessedChatId = null;
+            }
+        }
+    }, 100);
 });

@@ -259,7 +259,10 @@ wss.on('connection', ws => {
             if (data.type === 'stream_end' && data.chatId) {
                 const session = ongoingStreams.get(data.chatId);
                 if (session) {
-                    if (session.timer) clearTimeout(session.timer);
+                    if (session.timer) {
+                        clearTimeout(session.timer);
+                        session.timer = null;
+                    }
                     const finalize = () => {
                         if (session.messageId && session.lastText && session.lastText.trim() !== '') {
                             bot.editMessageText(session.lastText, {
@@ -267,16 +270,39 @@ wss.on('connection', ws => {
                                 message_id: session.messageId,
                             }).catch(err => {
                                 if (!err.message.includes('message is not modified')) console.error('编辑最终Telegram消息失败:', err.message);
-                            }).finally(() => ongoingStreams.delete(data.chatId));
-                        } else {
-                            ongoingStreams.delete(data.chatId);
+                            });
                         }
-                        console.log(`Telegram Bridge: ChatID ${data.chatId} 的流式传输已结束。`);
+                        // 不再在这里删除会话，等待final_message_update
                     };
                     !session.messageId ? setTimeout(finalize, 500) : finalize();
                 }
+                console.log(`Telegram Bridge: ChatID ${data.chatId} 的流式传输准最终更新已发送。`);
                 return;
             }
+
+            // --- 处理最终渲染后的消息更新 ---
+            if (data.type === 'final_message_update' && data.chatId) {
+                const session = ongoingStreams.get(data.chatId);
+                if (session && session.messageId) {
+                    console.log(`Telegram Bridge: 收到最终渲染文本，更新消息 ${session.messageId}`);
+                    bot.editMessageText(data.text, {
+                        chat_id: data.chatId,
+                        message_id: session.messageId,
+                        // 可选：在这里指定 parse_mode: 'MarkdownV2' 或 'HTML'
+                        // parse_mode: 'HTML',
+                    }).catch(err => {
+                        if (!err.message.includes('message is not modified')) console.error('编辑最终格式化Telegram消息失败:', err.message);
+                    }).finally(() => {
+                        // 在这里完成清理工作
+                        ongoingStreams.delete(data.chatId);
+                        console.log(`Telegram Bridge: ChatID ${data.chatId} 的会话已完成并清理。`);
+                    });
+                } else {
+                    console.warn(`Telegram Bridge: 收到final_message_update，但找不到ChatID ${data.chatId} 的会话或messageId。`);
+                }
+                return;
+            }
+
             // --- 其他消息处理逻辑 ---
             if (data.type === 'error_message' && data.chatId) {
                 console.error(`收到SillyTavern的错误报告，将发送至Telegram用户 ${data.chatId}: ${data.text}`);
@@ -341,11 +367,7 @@ bot.on('message', (msg) => {
     if (config.allowedUserIds && config.allowedUserIds.length > 0) {
         // 如果当前用户的ID不在白名单中
         if (!config.allowedUserIds.includes(userId)) {
-            console.log(`拒绝了来自非白名单用户的访问：
-  - User ID: ${userId}
-  - Username: @${username}
-  - Chat ID: ${chatId}
-  - Message: "${text}"`);
+            console.log(`拒绝了来自非白名单用户的访问：\n  - User ID: ${userId}\n  - Username: @${username}\n  - Chat ID: ${chatId}\n  - Message: "${text}"`);
             // 向该用户发送一条拒绝消息
             bot.sendMessage(chatId, '抱歉，您无权使用此机器人。').catch(err => {
                 console.error(`向 ${chatId} 发送拒绝消息失败:`, err.message);
