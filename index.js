@@ -3,6 +3,7 @@
 // 只从 getContext() 解构出稳定的、用于读取设置的对象
 const {
     extensionSettings,
+    deleteLastMessage, // 导入删除最后一条消息的函数
 } = SillyTavern.getContext();
 
 // 从 script.js 导入所有需要的公共API函数
@@ -104,21 +105,41 @@ function connect() {
                 const cleanup = () => {
                     eventSource.removeListener(event_types.STREAM_TOKEN_RECEIVED, streamCallback);
                     if (ws && ws.readyState === WebSocket.OPEN) {
-                        ws.send(JSON.stringify({ type: 'stream_end', chatId: data.chatId }));
+                        // 仅在没有错误的情况下发送stream_end
+                        if (!data.error) {
+                            ws.send(JSON.stringify({ type: 'stream_end', chatId: data.chatId }));
+                        }
                     }
                 };
 
                 // 5. 监听生成结束事件，确保无论成功与否都执行清理
                 eventSource.once(event_types.GENERATION_ENDED, cleanup);
 
-                // 6. 触发SillyTavern的标准生成流程
+                // 6. 触发SillyTavern的生成流程，并用try...catch包裹
                 try {
                     const abortController = new AbortController();
                     setExternalAbortController(abortController);
                     await Generate('normal', { signal: abortController.signal });
                 } catch (error) {
-                    console.error("SillyTavern Generate() error:", error);
-                    cleanup(); // 即使生成出错，也要确保清理
+                    console.error("SillyTavern Generate() 错误:", error);
+
+                    // a. 从SillyTavern聊天记录中删除导致错误的用户消息
+                    await deleteLastMessage();
+                    console.log('Telegram Bridge: 已删除导致错误的用户消息。');
+
+                    // b. 准备并发送错误信息到服务端
+                    const errorMessage = `抱歉，AI生成回复时遇到错误。\n您的上一条消息已被撤回，请重试或发送不同内容。\n\n错误详情: ${error.message || '未知错误'}`;
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({
+                            type: 'error_message',
+                            chatId: data.chatId,
+                            text: errorMessage,
+                        }));
+                    }
+
+                    // c. 标记错误以便cleanup函数知道
+                    data.error = true;
+                    cleanup(); // 确保清理监听器
                 }
 
                 return;
@@ -283,7 +304,7 @@ function connect() {
         } catch (error) {
             console.error('Telegram Bridge: 处理请求时发生错误：', error);
             if (data && data.chatId && ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: 'ai_reply', chatId: data.chatId, text: '处理您的请求时发生了一个内部错误。' }));
+                ws.send(JSON.stringify({ type: 'error_message', chatId: data.chatId, text: '处理您的请求时发生了一个内部错误。' }));
             }
         }
     };
@@ -322,13 +343,13 @@ jQuery(async () => {
         $('#telegram_bridge_url').on('input', () => {
             const settings = getSettings();
             settings.bridgeUrl = $('#telegram_bridge_url').val();
-            // SillyTavern's saveSettingsDebounced will handle saving automatically
+            // SillyTavern的saveSettingsDebounced将自动处理保存操作
         });
 
         $('#telegram_auto_connect').on('change', function () {
             const settings = getSettings();
             settings.autoConnect = $(this).prop('checked');
-            // SillyTavern's saveSettingsDebounced will handle saving automatically
+            // SillyTavern的saveSettingsDebounced将自动处理保存操作
         });
 
         $('#telegram_connect_button').on('click', connect);

@@ -98,49 +98,6 @@ let sillyTavernClient = null; // 用于存储连接的SillyTavern扩展客户端
 // 结构: { messageId: Number | null, lastText: String, timer: NodeJS.Timeout | null, isEditing: boolean }
 const ongoingStreams = new Map();
 
-// 系统命令处理函数
-function handleSystemCommand(command, chatId) {
-    console.log(`执行系统命令: ${command}`);
-
-    if (!sillyTavernClient || sillyTavernClient.readyState !== WebSocket.OPEN) {
-        bot.sendMessage(chatId, `SillyTavern未连接，无法执行 ${command} 命令。`);
-        return;
-    }
-
-    // 给WebSocket连接打上标记，告诉它关闭后应该做什么
-    sillyTavernClient.commandToExecuteOnClose = { command, chatId };
-
-    let responseMessage = '';
-    switch (command) {
-        case 'reload':
-            // 重载服务器端组件
-            responseMessage = '正在重载UI和服务器端组件...';
-            break;
-
-        case 'restart':
-            responseMessage = '正在重启服务器端组件... 请稍候。';
-            // 重启服务器端组件
-            break;
-        case 'exit':
-            // 退出服务器端组件
-            responseMessage = '正在关闭服务器端组件...';
-            break;
-        default:
-            console.warn(`未知的系统命令: ${command}`);
-            bot.sendMessage(chatId, `未知的系统命令: /${command}`);
-            delete sillyTavernClient.commandToExecuteOnClose;
-            return;
-    }
-
-    bot.sendMessage(chatId, responseMessage);
-
-    // 统一发送让前端刷新的指令
-    sillyTavernClient.send(JSON.stringify({
-        type: 'system_command',
-        command: 'reload_ui_only',
-        chatId: chatId
-    }));
-}
 // 重载服务器函数
 function reloadServer(chatId) {
     console.log('重载服务器端组件...');
@@ -156,15 +113,11 @@ function reloadServer(chatId) {
         console.log('配置文件已重新加载');
     } catch (error) {
         console.error('重新加载配置文件时出错:', error);
-        if (chatId) {
-            bot.sendMessage(chatId, '重新加载配置文件时出错: ' + error.message);
-        }
+        if (chatId) bot.sendMessage(chatId, '重新加载配置文件时出错: ' + error.message);
         return;
     }
     console.log('服务器端组件已重载');
-    if (chatId) {
-        bot.sendMessage(chatId, '服务器端组件已成功重载，配置文件已更新');
-    }
+    if (chatId) bot.sendMessage(chatId, '服务器端组件已成功重载。');
 }
 
 // 重启服务器函数
@@ -177,18 +130,9 @@ function restartServer(chatId) {
                 const { spawn } = require('child_process');
                 const serverPath = path.join(__dirname, 'server.js');
                 console.log(`重启服务器: ${serverPath}`);
-                const cleanEnv = {
-                    PATH: process.env.PATH,
-                    NODE_PATH: process.env.NODE_PATH,
-                };
-                if (chatId) {
-                    cleanEnv.RESTART_NOTIFY_CHATID = chatId.toString();
-                }
-                const child = spawn(process.execPath, [serverPath], {
-                    detached: true,
-                    stdio: 'inherit',
-                    env: cleanEnv
-                });
+                const cleanEnv = { PATH: process.env.PATH, NODE_PATH: process.env.NODE_PATH };
+                if (chatId) cleanEnv.RESTART_NOTIFY_CHATID = chatId.toString();
+                const child = spawn(process.execPath, [serverPath], { detached: true, stdio: 'inherit', env: cleanEnv });
                 child.unref();
                 process.exit(0);
             }, 1000);
@@ -226,6 +170,32 @@ function exitServer() {
     }
 }
 
+function handleSystemCommand(command, chatId) {
+    console.log(`执行系统命令: ${command}`);
+
+    if (!sillyTavernClient || sillyTavernClient.readyState !== WebSocket.OPEN) {
+        bot.sendMessage(chatId, `SillyTavern未连接，无法执行 ${command} 命令。`);
+        return;
+    }
+
+    sillyTavernClient.commandToExecuteOnClose = { command, chatId };
+
+    let responseMessage = '';
+    switch (command) {
+        case 'reload': responseMessage = '正在重载UI和服务器端组件...'; break;
+        case 'restart': responseMessage = '正在重启服务器端组件... 请稍候。'; break;
+        case 'exit': responseMessage = '正在关闭服务器端组件...'; break;
+        default:
+            console.warn(`未知的系统命令: ${command}`);
+            bot.sendMessage(chatId, `未知的系统命令: /${command}`);
+            delete sillyTavernClient.commandToExecuteOnClose;
+            return;
+    }
+
+    bot.sendMessage(chatId, responseMessage);
+    sillyTavernClient.send(JSON.stringify({ type: 'system_command', command: 'reload_ui_only', chatId }));
+}
+
 // --- WebSocket服务器逻辑 ---
 wss.on('connection', ws => {
     console.log('SillyTavern扩展已连接！');
@@ -235,7 +205,7 @@ wss.on('connection', ws => {
         try {
             const data = JSON.parse(message);
 
-            // --- 处理流式文本块 (最终修复逻辑 v3) ---
+            // --- 处理流式文本块 ---
             if (data.type === 'stream_chunk' && data.chatId) {
                 let session = ongoingStreams.get(data.chatId);
 
@@ -253,11 +223,8 @@ wss.on('connection', ws => {
                     bot.sendMessage(data.chatId, data.text || '...')
                         .then(sentMessage => {
                             const currentSession = ongoingStreams.get(data.chatId);
-                            if (currentSession) {
-                                currentSession.messageId = sentMessage.message_id;
-                            }
-                        })
-                        .catch(err => {
+                            if (currentSession) currentSession.messageId = sentMessage.message_id;
+                        }).catch(err => {
                             console.error('发送初始Telegram消息失败:', err);
                             ongoingStreams.delete(data.chatId); // 出错时清理
                         });
@@ -277,13 +244,9 @@ wss.on('connection', ws => {
                                 chat_id: data.chatId,
                                 message_id: currentSession.messageId,
                             }).catch(err => {
-                                if (!err.message.includes('message is not modified')) {
-                                    console.error('编辑Telegram消息失败:', err.message);
-                                }
+                                if (!err.message.includes('message is not modified')) console.error('编辑Telegram消息失败:', err.message);
                             }).finally(() => {
-                                if (ongoingStreams.has(data.chatId)) {
-                                    ongoingStreams.get(data.chatId).isEditing = false;
-                                }
+                                if (ongoingStreams.has(data.chatId)) ongoingStreams.get(data.chatId).isEditing = false;
                             });
                             currentSession.timer = null;
                         }
@@ -303,9 +266,7 @@ wss.on('connection', ws => {
                                 chat_id: data.chatId,
                                 message_id: session.messageId,
                             }).catch(err => {
-                                if (!err.message.includes('message is not modified')) {
-                                    console.error('编辑最终Telegram消息失败:', err.message);
-                                }
+                                if (!err.message.includes('message is not modified')) console.error('编辑最终Telegram消息失败:', err.message);
                             }).finally(() => ongoingStreams.delete(data.chatId));
                         } else {
                             ongoingStreams.delete(data.chatId);
@@ -316,9 +277,11 @@ wss.on('connection', ws => {
                 }
                 return;
             }
-
             // --- 其他消息处理逻辑 ---
-            if (data.type === 'ai_reply' && data.chatId) {
+            if (data.type === 'error_message' && data.chatId) {
+                console.error(`收到SillyTavern的错误报告，将发送至Telegram用户 ${data.chatId}: ${data.text}`);
+                bot.sendMessage(data.chatId, data.text);
+            } else if (data.type === 'ai_reply' && data.chatId) {
                 console.log(`收到非流式AI回复，发送至Telegram用户 ${data.chatId}`);
                 bot.sendMessage(data.chatId, data.text);
             } else if (data.type === 'typing_action' && data.chatId) {
