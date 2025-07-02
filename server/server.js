@@ -334,6 +334,26 @@ if (process.env.RESTART_NOTIFY_CHATID) {
 bot.on('message', (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text;
+    const userId = msg.from.id;
+    const username = msg.from.username || 'N/A';
+
+    // 检查白名单是否已配置且不为空
+    if (config.allowedUserIds && config.allowedUserIds.length > 0) {
+        // 如果当前用户的ID不在白名单中
+        if (!config.allowedUserIds.includes(userId)) {
+            console.log(`拒绝了来自非白名单用户的访问：
+  - User ID: ${userId}
+  - Username: @${username}
+  - Chat ID: ${chatId}
+  - Message: "${text}"`);
+            // 向该用户发送一条拒绝消息
+            bot.sendMessage(chatId, '抱歉，您无权使用此机器人。').catch(err => {
+                console.error(`向 ${chatId} 发送拒绝消息失败:`, err.message);
+            });
+            // 终止后续处理
+            return;
+        }
+    }
 
     if (!text) return;
 
