@@ -94,8 +94,8 @@ console.log(`WebSocket服务器正在监听端口 ${wssPort}...`);
 
 let sillyTavernClient = null; // 用于存储连接的SillyTavern扩展客户端
 
-// 用于存储正在进行的流式会话
-// 结构: { messageId: Number | null, lastText: String, timer: NodeJS.Timeout | null, isEditing: boolean }
+// 用于存储正在进行的流式会话，调整会话结构，使用Promise来处理messageId
+// 结构: { messagePromise: Promise<number> | null, lastText: String, timer: NodeJS.Timeout | null, isEditing: boolean }
 const ongoingStreams = new Map();
 
 // 重载服务器函数
@@ -201,7 +201,7 @@ wss.on('connection', ws => {
     console.log('SillyTavern扩展已连接！');
     sillyTavernClient = ws;
 
-    ws.on('message', message => {
+    ws.on('message', async (message) => { // 将整个回调设为async
         try {
             const data = JSON.parse(message);
 
@@ -209,10 +209,16 @@ wss.on('connection', ws => {
             if (data.type === 'stream_chunk' && data.chatId) {
                 let session = ongoingStreams.get(data.chatId);
 
-                // 1. 如果会话不存在，立即同步创建一个占位会话
+                // 1. 如果会话不存在，立即同步创建一个占位会话，创建会话和messagePromise
                 if (!session) {
+                    // 使用let声明，以便在Promise内部访问
+                    let resolveMessagePromise;
+                    const messagePromise = new Promise(resolve => {
+                        resolveMessagePromise = resolve;
+                    });
+
                     session = {
-                        messageId: null, // messageId 初始为 null
+                        messagePromise: messagePromise,
                         lastText: data.text,
                         timer: null,
                         isEditing: false, // 新增状态锁
@@ -222,8 +228,8 @@ wss.on('connection', ws => {
                     // 异步发送第一条消息并更新 session
                     bot.sendMessage(data.chatId, data.text || '...')
                         .then(sentMessage => {
-                            const currentSession = ongoingStreams.get(data.chatId);
-                            if (currentSession) currentSession.messageId = sentMessage.message_id;
+                            // 当消息发送成功时，解析Promise并传入messageId
+                            resolveMessagePromise(sentMessage.message_id);
                         }).catch(err => {
                             console.error('发送初始Telegram消息失败:', err);
                             ongoingStreams.delete(data.chatId); // 出错时清理
@@ -235,19 +241,25 @@ wss.on('connection', ws => {
 
                 // 3. 尝试触发一次编辑（节流保护）
                 // 确保 messageId 已经获取到，并且当前没有正在进行的编辑或定时器
-                if (session.messageId && !session.isEditing && !session.timer) {
-                    session.timer = setTimeout(() => {
+                // 使用 await messagePromise 来确保messageId可用
+                const messageId = await session.messagePromise;
+
+                if (messageId && !session.isEditing && !session.timer) {
+                    session.timer = setTimeout(async () => { // 定时器回调也设为async
                         const currentSession = ongoingStreams.get(data.chatId);
-                        if (currentSession && currentSession.messageId) {
-                            currentSession.isEditing = true;
-                            bot.editMessageText(currentSession.lastText, {
-                                chat_id: data.chatId,
-                                message_id: currentSession.messageId,
-                            }).catch(err => {
-                                if (!err.message.includes('message is not modified')) console.error('编辑Telegram消息失败:', err.message);
-                            }).finally(() => {
-                                if (ongoingStreams.has(data.chatId)) ongoingStreams.get(data.chatId).isEditing = false;
-                            });
+                        if (currentSession) {
+                            const currentMessageId = await currentSession.messagePromise;
+                            if (currentMessageId) {
+                                currentSession.isEditing = true;
+                                bot.editMessageText(currentSession.lastText, {
+                                    chat_id: data.chatId,
+                                    message_id: currentMessageId,
+                                }).catch(err => {
+                                    if (!err.message.includes('message is not modified')) console.error('编辑Telegram消息失败:', err.message);
+                                }).finally(() => {
+                                    if (ongoingStreams.has(data.chatId)) ongoingStreams.get(data.chatId).isEditing = false;
+                                });
+                            }
                             currentSession.timer = null;
                         }
                     }, 800);
@@ -263,18 +275,16 @@ wss.on('connection', ws => {
                         clearTimeout(session.timer);
                         session.timer = null;
                     }
-                    const finalize = () => {
-                        if (session.messageId && session.lastText && session.lastText.trim() !== '') {
-                            bot.editMessageText(session.lastText, {
-                                chat_id: data.chatId,
-                                message_id: session.messageId,
-                            }).catch(err => {
-                                if (!err.message.includes('message is not modified')) console.error('编辑最终Telegram消息失败:', err.message);
-                            });
-                        }
-                        // 不再在这里删除会话，等待final_message_update
-                    };
-                    !session.messageId ? setTimeout(finalize, 500) : finalize();
+                    // 使用 await messagePromise
+                    const messageId = await session.messagePromise;
+                    if (messageId && session.lastText && session.lastText.trim() !== '') {
+                        await bot.editMessageText(session.lastText, {
+                            chat_id: data.chatId,
+                            message_id: messageId,
+                        }).catch(err => {
+                            if (!err.message.includes('message is not modified')) console.error('编辑最终Telegram消息失败:', err.message);
+                        });
+                    }
                 }
                 console.log(`Telegram Bridge: ChatID ${data.chatId} 的流式传输准最终更新已发送。`);
                 return;
@@ -283,23 +293,28 @@ wss.on('connection', ws => {
             // --- 处理最终渲染后的消息更新 ---
             if (data.type === 'final_message_update' && data.chatId) {
                 const session = ongoingStreams.get(data.chatId);
-                if (session && session.messageId) {
-                    console.log(`Telegram Bridge: 收到最终渲染文本，更新消息 ${session.messageId}`);
-                    bot.editMessageText(data.text, {
-                        chat_id: data.chatId,
-                        message_id: session.messageId,
-                        // 可选：在这里指定 parse_mode: 'MarkdownV2' 或 'HTML'
-                        // parse_mode: 'HTML',
-                    }).catch(err => {
-                        if (!err.message.includes('message is not modified')) console.error('编辑最终格式化Telegram消息失败:', err.message);
-                    }).finally(() => {
-                        // 在这里完成清理工作
-                        ongoingStreams.delete(data.chatId);
-                        console.log(`Telegram Bridge: ChatID ${data.chatId} 的会话已完成并清理。`);
-                    });
+                if (session) {
+                    // 使用 await messagePromise
+                    const messageId = await session.messagePromise;
+                    if (messageId) {
+                        console.log(`Telegram Bridge: 收到最终渲染文本，更新消息 ${messageId}`);
+                        await bot.editMessageText(data.text, {
+                            chat_id: data.chatId,
+                            message_id: messageId,
+                            // 可选：在这里指定 parse_mode: 'MarkdownV2' 或 'HTML'
+                            // parse_mode: 'HTML',
+                        }).catch(err => {
+                            if (!err.message.includes('message is not modified')) console.error('编辑最终格式化Telegram消息失败:', err.message);
+                        });
+                    } else {
+                        console.warn(`Telegram Bridge: 收到final_message_update，但messageId未能获取。`);
+                    }
                 } else {
-                    console.warn(`Telegram Bridge: 收到final_message_update，但找不到ChatID ${data.chatId} 的会话或messageId。`);
+                    console.warn(`Telegram Bridge: 收到final_message_update，但找不到ChatID ${data.chatId} 的会话。`);
                 }
+                // 无论成功与否都清理会话
+                ongoingStreams.delete(data.chatId);
+                console.log(`Telegram Bridge: ChatID ${data.chatId} 的会话已完成并清理。`);
                 return;
             }
 
@@ -316,6 +331,10 @@ wss.on('connection', ws => {
             }
         } catch (error) {
             console.error('处理SillyTavern消息时出错:', error);
+            // 确保即使在解析JSON失败时也能清理
+            if (data && data.chatId) {
+                ongoingStreams.delete(data.chatId);
+            }
         }
     });
 
