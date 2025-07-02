@@ -108,8 +108,8 @@ SillyTavern Telegram Connector 是一个为 SillyTavern 设计的扩展，允许
   - [ ] 将server转换为标准服务端插件，遵循[SillyTavern服务端插件规范](https://docs.sillytavern.app/for-contributors/server-plugins/)
 
 - **用户体验改进**：
-  - [ ] 调整编辑消息的频率
-  - [ ] 流式传输优化：生成足够字数后再显示初始信息
+  - [x] 调整编辑消息的频率
+  - [x] 流式传输优化：生成足够字数后再显示初始信息
   - [ ] "输入中"状态持续整个流式响应过程
   - [ ] 在ST扩展设置页显示更多信息（如"已连接，等待消息"、"正在接收AI回复..."等状态）
   - [ ] 新增`/ping`命令，让用户随时查询Bridge连接状态和SillyTavern状态

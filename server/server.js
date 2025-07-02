@@ -226,7 +226,7 @@ wss.on('connection', ws => {
                     ongoingStreams.set(data.chatId, session);
 
                     // 异步发送第一条消息并更新 session
-                    bot.sendMessage(data.chatId, data.text || '...')
+                    bot.sendMessage(data.chatId, '正在思考...')
                         .then(sentMessage => {
                             // 当消息发送成功时，解析Promise并传入messageId
                             resolveMessagePromise(sentMessage.message_id);
@@ -251,7 +251,7 @@ wss.on('connection', ws => {
                             const currentMessageId = await currentSession.messagePromise;
                             if (currentMessageId) {
                                 currentSession.isEditing = true;
-                                bot.editMessageText(currentSession.lastText, {
+                                bot.editMessageText(currentSession.lastText + ' ...', {
                                     chat_id: data.chatId,
                                     message_id: currentMessageId,
                                 }).catch(err => {
@@ -262,7 +262,7 @@ wss.on('connection', ws => {
                             }
                             currentSession.timer = null;
                         }
-                    }, 800);
+                    }, 2000);
                 }
                 return;
             }
