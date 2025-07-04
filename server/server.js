@@ -202,8 +202,9 @@ wss.on('connection', ws => {
     sillyTavernClient = ws;
 
     ws.on('message', async (message) => { // 将整个回调设为async
+        let data; // 在 try 块外部声明 data
         try {
-            const data = JSON.parse(message);
+            data = JSON.parse(message);
 
             // --- 处理流式文本块 ---
             if (data.type === 'stream_chunk' && data.chatId) {
@@ -293,11 +294,13 @@ wss.on('connection', ws => {
             // --- 处理最终渲染后的消息更新 ---
             if (data.type === 'final_message_update' && data.chatId) {
                 const session = ongoingStreams.get(data.chatId);
+
+                // 如果会话存在，说明是流式传输的最终更新
                 if (session) {
                     // 使用 await messagePromise
                     const messageId = await session.messagePromise;
                     if (messageId) {
-                        console.log(`Telegram Bridge: 收到最终渲染文本，更新消息 ${messageId}`);
+                        console.log(`Telegram Bridge: 收到流式最终渲染文本，更新消息 ${messageId}`);
                         await bot.editMessageText(data.text, {
                             chat_id: data.chatId,
                             message_id: messageId,
@@ -307,14 +310,21 @@ wss.on('connection', ws => {
                             if (!err.message.includes('message is not modified')) console.error('编辑最终格式化Telegram消息失败:', err.message);
                         });
                     } else {
-                        console.warn(`Telegram Bridge: 收到final_message_update，但messageId未能获取。`);
+                        console.warn(`Telegram Bridge: 收到final_message_update，但流式会话的messageId未能获取。`);
                     }
-                } else {
-                    console.warn(`Telegram Bridge: 收到final_message_update，但找不到ChatID ${data.chatId} 的会话。`);
+                    // 清理流式会话
+                    ongoingStreams.delete(data.chatId);
+                    console.log(`Telegram Bridge: ChatID ${data.chatId} 的流式会话已完成并清理。`);
                 }
-                // 无论成功与否都清理会话
-                ongoingStreams.delete(data.chatId);
-                console.log(`Telegram Bridge: ChatID ${data.chatId} 的会话已完成并清理。`);
+                // 如果会话不存在，说明这是一个完整的非流式回复
+                else {
+                    console.log(`Telegram Bridge: 收到非流式完整回复，直接发送新消息到 ChatID ${data.chatId}`);
+                    await bot.sendMessage(data.chatId, data.text, {
+                        // 可选：在这里指定 parse_mode
+                    }).catch(err => {
+                        console.error('发送非流式完整回复失败:', err.message);
+                    });
+                }
                 return;
             }
 

@@ -87,13 +87,13 @@ function connect() {
                 // 存储当前处理的chatId
                 lastProcessedChatId = data.chatId;
 
-                // 1. 将用户消息添加到SillyTavern
-                await sendMessageAsUser(data.text);
-
-                // 2. 立即向Telegram发送“输入中”状态
+                // 1. 立即向Telegram发送“输入中”状态（无论是否流式）
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     ws.send(JSON.stringify({ type: 'typing_action', chatId: data.chatId }));
                 }
+
+                // 2. 将用户消息添加到SillyTavern
+                await sendMessageAsUser(data.text);
 
                 // 3. 设置流式传输的回调
                 const streamCallback = (cumulativeText) => {
