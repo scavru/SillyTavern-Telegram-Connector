@@ -4,6 +4,7 @@
 const {
     extensionSettings,
     deleteLastMessage, // 导入删除最后一条消息的函数
+    saveSettingsDebounced, // 导入保存设置的函数
 } = SillyTavern.getContext();
 
 // getContext 函数是全局 SillyTavern 对象的一部分，我们不需要从别处导入它
@@ -55,23 +56,23 @@ function reloadPage() {
 // 连接到WebSocket服务器
 function connect() {
     if (ws && ws.readyState === WebSocket.OPEN) {
-        console.log('Telegram Bridge: 已连接');
+        console.log('[Telegram Bridge] 已连接');
         return;
     }
 
     const settings = getSettings();
     if (!settings.bridgeUrl) {
-        updateStatus('Telegram Bridge URL 未设置！', 'red');
+        updateStatus('URL 未设置！', 'red');
         return;
     }
 
     updateStatus('连接中...', 'orange');
-    console.log(`Telegram Bridge: 正在连接 ${settings.bridgeUrl}...`);
+    console.log(`[Telegram Bridge] 正在连接 ${settings.bridgeUrl}...`);
 
     ws = new WebSocket(settings.bridgeUrl);
 
     ws.onopen = () => {
-        console.log('Telegram Bridge: 连接成功！');
+        console.log('[Telegram Bridge] 连接成功！');
         updateStatus('已连接', 'green');
     };
 
@@ -82,7 +83,7 @@ function connect() {
 
             // --- 用户消息处理（流式版本） ---
             if (data.type === 'user_message') {
-                console.log('Telegram Bridge: 收到用户消息。', data);
+                console.log('[Telegram Bridge] 收到用户消息。', data);
 
                 // 存储当前处理的chatId
                 lastProcessedChatId = data.chatId;
@@ -129,11 +130,11 @@ function connect() {
                     setExternalAbortController(abortController);
                     await Generate('normal', { signal: abortController.signal });
                 } catch (error) {
-                    console.error("SillyTavern Generate() 错误:", error);
+                    console.error("[Telegram Bridge] Generate() 错误:", error);
 
                     // a. 从SillyTavern聊天记录中删除导致错误的用户消息
                     await deleteLastMessage();
-                    console.log('Telegram Bridge: 已删除导致错误的用户消息。');
+                    console.log('[Telegram Bridge] 已删除导致错误的用户消息。');
 
                     // b. 准备并发送错误信息到服务端
                     const errorMessage = `抱歉，AI生成回复时遇到错误。\n您的上一条消息已被撤回，请重试或发送不同内容。\n\n错误详情: ${error.message || '未知错误'}`;
@@ -155,9 +156,9 @@ function connect() {
 
             // --- 系统命令处理 ---
             if (data.type === 'system_command') {
-                console.log('Telegram Bridge: 收到系统命令', data);
+                console.log('[Telegram Bridge] 收到系统命令', data);
                 if (data.command === 'reload_ui_only') {
-                    console.log('Telegram Bridge: 正在刷新UI...');
+                    console.log('[Telegram Bridge] 正在刷新UI...');
                     setTimeout(reloadPage, 500);
                 }
                 return;
@@ -165,7 +166,7 @@ function connect() {
 
             // --- Telegram命令请求处理 ---
             if (data.type === 'command_request') {
-                console.log('Telegram Bridge: 处理命令。', data);
+                console.log('[Telegram Bridge] 处理命令。', data);
 
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     ws.send(JSON.stringify({ type: 'typing_action', chatId: data.chatId }));
@@ -311,7 +312,7 @@ function connect() {
                 }
             }
         } catch (error) {
-            console.error('Telegram Bridge: 处理请求时发生错误：', error);
+            console.error('[Telegram Bridge] 处理请求时发生错误：', error);
             if (data && data.chatId && ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({ type: 'error_message', chatId: data.chatId, text: '处理您的请求时发生了一个内部错误。' }));
             }
@@ -319,13 +320,13 @@ function connect() {
     };
 
     ws.onclose = () => {
-        console.log('Telegram Bridge: 连接已关闭。');
+        console.log('[Telegram Bridge] 连接已关闭。');
         updateStatus('连接已断开', 'red');
         ws = null;
     };
 
     ws.onerror = (error) => {
-        console.error('Telegram Bridge: WebSocket 错误：', error);
+        console.error('[Telegram Bridge] WebSocket 错误：', error);
         updateStatus('连接错误', 'red');
         ws = null;
     };
@@ -339,11 +340,11 @@ function disconnect() {
 
 // 扩展加载时执行的函数
 jQuery(async () => {
-    console.log('正在尝试加载 Telegram Connector 设置 UI...');
+    console.log('[Telegram Bridge] 正在尝试加载设置 UI...');
     try {
         const settingsHtml = await $.get(`/scripts/extensions/third-party/${MODULE_NAME}/settings.html`);
         $('#extensions_settings').append(settingsHtml);
-        console.log('Telegram Connector 设置 UI 应该已经被添加。');
+        console.log('[Telegram Bridge] 设置 UI 应该已经被添加。');
 
         const settings = getSettings();
         $('#telegram_bridge_url').val(settings.bridgeUrl);
@@ -352,27 +353,30 @@ jQuery(async () => {
         $('#telegram_bridge_url').on('input', () => {
             const settings = getSettings();
             settings.bridgeUrl = $('#telegram_bridge_url').val();
-            // SillyTavern的saveSettingsDebounced将自动处理保存操作
+            // 确保调用saveSettingsDebounced保存设置
+            saveSettingsDebounced();
         });
 
         $('#telegram_auto_connect').on('change', function () {
             const settings = getSettings();
             settings.autoConnect = $(this).prop('checked');
-            // SillyTavern的saveSettingsDebounced将自动处理保存操作
+            // 确保调用saveSettingsDebounced保存设置
+            console.log(`[Telegram Bridge] 自动连接设置已更改为: ${settings.autoConnect}`);
+            saveSettingsDebounced();
         });
 
         $('#telegram_connect_button').on('click', connect);
         $('#telegram_disconnect_button').on('click', disconnect);
 
         if (settings.autoConnect) {
-            console.log('Telegram Bridge: 自动连接已启用，正在连接...');
+            console.log('[Telegram Bridge] 自动连接已启用，正在连接...');
             connect();
         }
 
     } catch (error) {
-        console.error('加载 Telegram Connector 设置 HTML 失败。', error);
+        console.error('[Telegram Bridge] 加载设置 HTML 失败。', error);
     }
-    console.log('Telegram Connector 扩展已加载。');
+    console.log('[Telegram Bridge] 扩展已加载。');
 });
 
 // 全局事件监听器，用于最终消息更新
@@ -399,7 +403,7 @@ eventSource.on(event_types.GENERATION_ENDED, (lastMessageIdInChatArray) => {
                 // 使用 .html() 而不是 .text() 来保留换行等格式
                 const renderedText = messageElement.find('.mes_text').text();
 
-                console.log(`Telegram Bridge: 捕获到最终渲染文本，准备发送更新到 chatId: ${lastProcessedChatId}`);
+                console.log(`[Telegram Bridge] 捕获到最终渲染文本，准备发送更新到 chatId: ${lastProcessedChatId}`);
 
                 ws.send(JSON.stringify({
                     type: 'final_message_update',
