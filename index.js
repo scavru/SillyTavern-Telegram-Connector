@@ -400,8 +400,19 @@ eventSource.on(event_types.GENERATION_ENDED, (lastMessageIdInChatArray) => {
             const messageElement = $(`#chat .mes[mesid="${lastMessageIndex}"]`);
 
             if (messageElement.length > 0) {
-                // 使用 .html() 而不是 .text() 来保留换行等格式
-                const renderedText = messageElement.find('.mes_text').text();
+                // 获取消息文本元素
+                const messageTextElement = messageElement.find('.mes_text');
+
+                // 获取HTML内容并替换<br>和</p><p>为换行符
+                let renderedText = messageTextElement.html()
+                    .replace(/<br\s*\/?>/gi, '\n')
+                    .replace(/<\/p>\s*<p>/gi, '\n\n')
+                // .replace(/<[^>]*>/g, ''); // 移除所有其他HTML标签
+
+                // 解码HTML实体
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = renderedText;
+                renderedText = tempDiv.textContent;
 
                 console.log(`[Telegram Bridge] 捕获到最终渲染文本，准备发送更新到 chatId: ${lastProcessedChatId}`);
 
