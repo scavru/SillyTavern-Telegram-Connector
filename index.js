@@ -123,6 +123,8 @@ function connect() {
                 // 5. 监听生成结束事件，确保无论成功与否都执行清理
                 // 注意: 我们现在使用once来确保这个监听器只执行一次，避免干扰后续的全局监听器
                 eventSource.once(event_types.GENERATION_ENDED, cleanup);
+                // 添加对手动停止生成的处理
+                eventSource.once(event_types.GENERATION_STOPPED, cleanup);
 
                 // 6. 触发SillyTavern的生成流程，并用try...catch包裹
                 try {
@@ -380,7 +382,7 @@ jQuery(async () => {
 });
 
 // 全局事件监听器，用于最终消息更新
-eventSource.on(event_types.GENERATION_ENDED, (lastMessageIdInChatArray) => {
+function handleFinalMessage(lastMessageIdInChatArray) {
     // 确保WebSocket已连接，并且我们有一个有效的chatId来发送更新
     if (!ws || ws.readyState !== WebSocket.OPEN || !lastProcessedChatId) {
         return;
@@ -427,4 +429,10 @@ eventSource.on(event_types.GENERATION_ENDED, (lastMessageIdInChatArray) => {
             }
         }
     }, 100);
-});
+}
+
+// 全局事件监听器，用于最终消息更新
+eventSource.on(event_types.GENERATION_ENDED, handleFinalMessage);
+
+// 添加对手动停止生成的处理
+eventSource.on(event_types.GENERATION_STOPPED, handleFinalMessage);

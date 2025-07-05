@@ -113,12 +113,15 @@ SillyTavern Telegram Connector 是一个为 SillyTavern 设计的扩展，允许
   - [x] 调整编辑消息的频率
   - [x] 流式传输优化：生成足够字数后再显示初始信息
   - [ ] "输入中"状态持续整个流式响应过程
-  - [ ] 在ST扩展设置页显示更多信息（如"已连接，等待消息"、"正在接收AI回复..."等状态）
   - [x] 新增`/ping`命令，让用户随时查询Bridge连接状态和SillyTavern状态
+
+- **设置菜单**：
+  - [ ] 扩展设置页新增白名单设置
+  - [ ] 控制当角色切换等网页活动时是否向Telegram发送通知
 
 - **错误处理与稳定性**：
   - [ ] `/exit`命令总是"退出操作超时，强制退出进程"
-  - [ ] 处理ST中"停止生成"按钮点击事件（GENERATION_STOPPED而非GENERATION_ENDED）
+  - [x] 处理ST中"停止生成"按钮点击事件（GENERATION_STOPPED而非GENERATION_ENDED）
   - [ ] 处理正在生成时发送新消息的情况（拦截并提示用户正在生成中，不提交到ST）
   - [ ] 在`/switchchar`或`/switchchat`命令后通知server清空旧缓存状态
 
