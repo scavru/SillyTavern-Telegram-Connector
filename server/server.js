@@ -178,6 +178,14 @@ function handleSystemCommand(command, chatId) {
         return;
     }
 
+    // 处理 ping 命令 - 不需要关闭连接，直接返回状态信息
+    if (command === 'ping') {
+        const bridgeStatus = 'Bridge状态：已连接 ✅';
+        const stStatus = 'SillyTavern状态：已连接 ✅';
+        bot.sendMessage(chatId, `${bridgeStatus}\n${stStatus}`);
+        return;
+    }
+
     sillyTavernClient.commandToExecuteOnClose = { command, chatId };
 
     let responseMessage = '';
@@ -412,7 +420,7 @@ bot.on('message', (msg) => {
         const parts = text.slice(1).trim().split(/\s+/);
         const command = parts[0].toLowerCase();
 
-        if (['reload', 'restart', 'exit'].includes(command)) {
+        if (['reload', 'restart', 'exit', 'ping'].includes(command)) {
             handleSystemCommand(command, chatId);
             return;
         }
