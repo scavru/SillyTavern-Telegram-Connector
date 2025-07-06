@@ -32,6 +32,9 @@ const DEFAULT_SETTINGS = {
 let ws = null; // WebSocket实例
 let lastProcessedChatId = null; // 用于存储最后处理过的Telegram chatId
 
+// 添加一个全局变量来跟踪当前是否处于流式模式
+let isStreamingMode = false;
+
 // --- 工具函数 ---
 function getSettings() {
     if (!extensionSettings[MODULE_NAME]) {
@@ -81,12 +84,15 @@ function connect() {
         try {
             data = JSON.parse(event.data);
 
-            // --- 用户消息处理（流式版本） ---
+            // --- 用户消息处理 ---
             if (data.type === 'user_message') {
                 console.log('[Telegram Bridge] 收到用户消息。', data);
 
                 // 存储当前处理的chatId
                 lastProcessedChatId = data.chatId;
+
+                // 默认情况下，假设不是流式模式
+                isStreamingMode = false;
 
                 // 1. 立即向Telegram发送“输入中”状态（无论是否流式）
                 if (ws && ws.readyState === WebSocket.OPEN) {
@@ -98,6 +104,8 @@ function connect() {
 
                 // 3. 设置流式传输的回调
                 const streamCallback = (cumulativeText) => {
+                    // 标记为流式模式
+                    isStreamingMode = true;
                     // 将每个文本块通过WebSocket发送到服务端
                     if (ws && ws.readyState === WebSocket.OPEN) {
                         ws.send(JSON.stringify({
@@ -112,12 +120,13 @@ function connect() {
                 // 4. 定义一个清理函数
                 const cleanup = () => {
                     eventSource.removeListener(event_types.STREAM_TOKEN_RECEIVED, streamCallback);
-                    if (ws && ws.readyState === WebSocket.OPEN) {
-                        // 仅在没有错误的情况下发送stream_end
+                    if (ws && ws.readyState === WebSocket.OPEN && isStreamingMode) {
+                        // 仅在没有错误且确实处于流式模式时发送stream_end
                         if (!data.error) {
                             ws.send(JSON.stringify({ type: 'stream_end', chatId: data.chatId }));
                         }
                     }
+                    // 注意：不在这里重置isStreamingMode，让handleFinalMessage函数来处理
                 };
 
                 // 5. 监听生成结束事件，确保无论成功与否都执行清理
@@ -309,9 +318,11 @@ function connect() {
                     }
                 }
 
+                // 直接发送非流式回复
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     ws.send(JSON.stringify({ type: 'ai_reply', chatId: data.chatId, text: replyText }));
                 }
+                return;
             }
         } catch (error) {
             console.error('[Telegram Bridge] 处理请求时发生错误：', error);
@@ -418,11 +429,24 @@ function handleFinalMessage(lastMessageIdInChatArray) {
 
                 console.log(`[Telegram Bridge] 捕获到最终渲染文本，准备发送更新到 chatId: ${lastProcessedChatId}`);
 
-                ws.send(JSON.stringify({
-                    type: 'final_message_update',
-                    chatId: lastProcessedChatId,
-                    text: renderedText,
-                }));
+                // 判断是流式还是非流式响应
+                if (isStreamingMode) {
+                    // 流式响应 - 发送final_message_update
+                    ws.send(JSON.stringify({
+                        type: 'final_message_update',
+                        chatId: lastProcessedChatId,
+                        text: renderedText,
+                    }));
+                    // 重置流式模式标志
+                    isStreamingMode = false;
+                } else {
+                    // 非流式响应 - 直接发送ai_reply
+                    ws.send(JSON.stringify({
+                        type: 'ai_reply',
+                        chatId: lastProcessedChatId,
+                        text: renderedText,
+                    }));
+                }
 
                 // 重置chatId，避免意外更新其他用户的消息
                 lastProcessedChatId = null;
