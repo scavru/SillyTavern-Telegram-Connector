@@ -175,153 +175,162 @@ function connect() {
                 return;
             }
 
-            // --- Telegram命令请求处理 ---
-            if (data.type === 'command_request') {
-                console.log('[Telegram Bridge] 处理命令。', data);
+            // --- 执行命令处理 ---
+            if (data.type === 'execute_command') {
+                console.log('[Telegram Bridge] 执行命令', data);
 
+                // 显示“输入中”状态
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     ws.send(JSON.stringify({ type: 'typing_action', chatId: data.chatId }));
                 }
 
-                let replyText = `未知命令: /${data.command}。 使用 /help 查看所有命令。`;
+                let replyText = '命令执行失败，请稍后重试。';
 
                 // 直接调用全局的 SillyTavern.getContext()
                 const context = SillyTavern.getContext();
+                let commandSuccess = false;
 
-                switch (data.command) {
-                    case 'help':
-                        replyText = `SillyTavern Telegram Bridge 命令：\n\n`;
-                        replyText += `聊天管理\n`;
-                        replyText += `/new - 开始与当前角色的新聊天。\n`;
-                        replyText += `/listchats - 列出当前角色的所有已保存的聊天记录。\n`;
-                        replyText += `/switchchat <chat_name> - 加载特定的聊天记录。\n`;
-                        replyText += `/switchchat_<序号> - 通过序号加载聊天记录。\n\n`;
-                        replyText += `角色管理\n`;
-                        replyText += `/listchars - 列出所有可用角色。\n`;
-                        replyText += `/switchchar <char_name> - 切换到指定角色。\n`;
-                        replyText += `/switchchar_<序号> - 通过序号切换角色。\n\n`;
-                        replyText += `系统管理\n`;
-                        replyText += `/reload - 重载插件的服务器端组件并刷新ST网页。\n`;
-                        replyText += `/restart - 刷新ST网页并重启插件的服务器端组件。\n`;
-                        replyText += `/exit - 退出插件的服务器端组件。\n\n`;
-                        replyText += `帮助\n`;
-                        replyText += `/help - 显示此帮助信息。`;
-                        break;
-                    case 'new':
-                        await doNewChat({ deleteCurrentChat: false });
-                        replyText = '新的聊天已经开始。';
-                        break;
-                    case 'listchars': {
-                        const characters = context.characters.slice(1);
-                        if (characters.length > 0) {
-                            replyText = '可用角色列表：\n\n';
-                            characters.forEach((char, index) => {
-                                replyText += `${index + 1}. /switchchar_${index + 1} - ${char.name}\n`;
-                            });
-                            replyText += '\n使用 /switchchar_数字 或 /switchchar 角色名称 来切换角色';
-                        } else {
-                            replyText = '没有找到可用角色。';
-                        }
-                        break;
-                    }
-                    case 'switchchar': {
-                        if (data.args.length === 0) {
-                            replyText = '请提供角色名称或序号。用法: /switchchar <角色名称> 或 /switchchar_数字';
+                try {
+                    switch (data.command) {
+                        case 'new':
+                            await doNewChat({ deleteCurrentChat: false });
+                            replyText = '新的聊天已经开始。';
+                            commandSuccess = true;
                             break;
-                        }
-                        const targetName = data.args.join(' ');
-                        const characters = context.characters;
-                        const targetChar = characters.find(c => c.name === targetName);
-
-                        if (targetChar) {
-                            const charIndex = characters.indexOf(targetChar);
-                            await selectCharacterById(charIndex);
-                            replyText = `已成功切换到角色 "${targetName}"。`;
-                        } else {
-                            replyText = `角色 "${targetName}" 未找到。`;
-                        }
-                        break;
-                    }
-                    case 'listchats': {
-                        if (context.characterId === undefined) {
-                            replyText = '请先选择一个角色。';
-                            break;
-                        }
-                        const chatFiles = await getPastCharacterChats(context.characterId);
-                        if (chatFiles.length > 0) {
-                            replyText = '当前角色的聊天记录：\n\n';
-                            chatFiles.forEach((chat, index) => {
-                                const chatName = chat.file_name.replace('.jsonl', '');
-                                replyText += `${index + 1}. /switchchat_${index + 1} - ${chatName}\n`;
-                            });
-                            replyText += '\n使用 /switchchat_数字 或 /switchchat 聊天名称 来切换聊天';
-                        } else {
-                            replyText = '当前角色没有任何聊天记录。';
-                        }
-                        break;
-                    }
-                    case 'switchchat': {
-                        if (data.args.length === 0) {
-                            replyText = '请提供聊天记录名称。用法： /switchchat <聊天记录名称>';
-                            break;
-                        }
-                        const targetChatFile = `${data.args.join(' ')}`;
-                        try {
-                            await openCharacterChat(targetChatFile);
-                            replyText = `已加载聊天记录： ${targetChatFile}`;
-                        } catch (err) {
-                            console.error(err);
-                            replyText = `加载聊天记录 "${targetChatFile}" 失败。请确认名称完全正确。`;
-                        }
-                        break;
-                    }
-                    default: {
-                        const charMatch = data.command.match(/^switchchar_(\d+)$/);
-                        if (charMatch) {
-                            const index = parseInt(charMatch[1]) - 1;
+                        case 'listchars': {
                             const characters = context.characters.slice(1);
-                            if (index >= 0 && index < characters.length) {
-                                const targetChar = characters[index];
-                                const charIndex = context.characters.indexOf(targetChar);
-                                await selectCharacterById(charIndex);
-                                replyText = `已切换到角色 "${targetChar.name}"。`;
+                            if (characters.length > 0) {
+                                replyText = '可用角色列表：\n\n';
+                                characters.forEach((char, index) => {
+                                    replyText += `${index + 1}. /switchchar_${index + 1} - ${char.name}\n`;
+                                });
+                                replyText += '\n使用 /switchchar_数字 或 /switchchar 角色名称 来切换角色';
                             } else {
-                                replyText = `无效的角色序号: ${index + 1}。请使用 /listchars 查看可用角色。`;
+                                replyText = '没有找到可用角色。';
+                            }
+                            commandSuccess = true;
+                            break;
+                        }
+                        case 'switchchar': {
+                            if (!data.args || data.args.length === 0) {
+                                replyText = '请提供角色名称或序号。用法: /switchchar <角色名称> 或 /switchchar_数字';
+                                break;
+                            }
+                            const targetName = data.args.join(' ');
+                            const characters = context.characters;
+                            const targetChar = characters.find(c => c.name === targetName);
+
+                            if (targetChar) {
+                                const charIndex = characters.indexOf(targetChar);
+                                await selectCharacterById(charIndex);
+                                replyText = `已成功切换到角色 "${targetName}"。`;
+                                commandSuccess = true;
+                            } else {
+                                replyText = `角色 "${targetName}" 未找到。`;
                             }
                             break;
                         }
-
-                        const chatMatch = data.command.match(/^switchchat_(\d+)$/);
-                        if (chatMatch) {
+                        case 'listchats': {
                             if (context.characterId === undefined) {
                                 replyText = '请先选择一个角色。';
                                 break;
                             }
-                            const index = parseInt(chatMatch[1]) - 1;
                             const chatFiles = await getPastCharacterChats(context.characterId);
-
-                            if (index >= 0 && index < chatFiles.length) {
-                                const targetChat = chatFiles[index];
-                                const chatName = targetChat.file_name.replace('.jsonl', '');
-                                try {
-                                    await openCharacterChat(chatName);
-                                    replyText = `已加载聊天记录： ${chatName}`;
-                                } catch (err) {
-                                    console.error(err);
-                                    replyText = `加载聊天记录失败。`;
-                                }
+                            if (chatFiles.length > 0) {
+                                replyText = '当前角色的聊天记录：\n\n';
+                                chatFiles.forEach((chat, index) => {
+                                    const chatName = chat.file_name.replace('.jsonl', '');
+                                    replyText += `${index + 1}. /switchchat_${index + 1} - ${chatName}\n`;
+                                });
+                                replyText += '\n使用 /switchchat_数字 或 /switchchat 聊天名称 来切换聊天';
                             } else {
-                                replyText = `无效的聊天记录序号: ${index + 1}。请使用 /listchats 查看可用聊天记录。`;
+                                replyText = '当前角色没有任何聊天记录。';
+                            }
+                            commandSuccess = true;
+                            break;
+                        }
+                        case 'switchchat': {
+                            if (!data.args || data.args.length === 0) {
+                                replyText = '请提供聊天记录名称。用法： /switchchat <聊天记录名称>';
+                                break;
+                            }
+                            const targetChatFile = `${data.args.join(' ')}`;
+                            try {
+                                await openCharacterChat(targetChatFile);
+                                replyText = `已加载聊天记录： ${targetChatFile}`;
+                                commandSuccess = true;
+                            } catch (err) {
+                                console.error(err);
+                                replyText = `加载聊天记录 "${targetChatFile}" 失败。请确认名称完全正确。`;
                             }
                             break;
                         }
+                        default: {
+                            // 处理特殊格式的命令，如 switchchar_1, switchchat_2 等
+                            const charMatch = data.command.match(/^switchchar_(\d+)$/);
+                            if (charMatch) {
+                                const index = parseInt(charMatch[1]) - 1;
+                                const characters = context.characters.slice(1);
+                                if (index >= 0 && index < characters.length) {
+                                    const targetChar = characters[index];
+                                    const charIndex = context.characters.indexOf(targetChar);
+                                    await selectCharacterById(charIndex);
+                                    replyText = `已切换到角色 "${targetChar.name}"。`;
+                                    commandSuccess = true;
+                                } else {
+                                    replyText = `无效的角色序号: ${index + 1}。请使用 /listchars 查看可用角色。`;
+                                }
+                                break;
+                            }
+
+                            const chatMatch = data.command.match(/^switchchat_(\d+)$/);
+                            if (chatMatch) {
+                                if (context.characterId === undefined) {
+                                    replyText = '请先选择一个角色。';
+                                    break;
+                                }
+                                const index = parseInt(chatMatch[1]) - 1;
+                                const chatFiles = await getPastCharacterChats(context.characterId);
+
+                                if (index >= 0 && index < chatFiles.length) {
+                                    const targetChat = chatFiles[index];
+                                    const chatName = targetChat.file_name.replace('.jsonl', '');
+                                    try {
+                                        await openCharacterChat(chatName);
+                                        replyText = `已加载聊天记录： ${chatName}`;
+                                        commandSuccess = true;
+                                    } catch (err) {
+                                        console.error(err);
+                                        replyText = `加载聊天记录失败。`;
+                                    }
+                                } else {
+                                    replyText = `无效的聊天记录序号: ${index + 1}。请使用 /listchats 查看可用聊天记录。`;
+                                }
+                                break;
+                            }
+
+                            replyText = `未知命令: /${data.command}。使用 /help 查看所有命令。`;
+                        }
                     }
+                } catch (error) {
+                    console.error('[Telegram Bridge] 执行命令时出错:', error);
+                    replyText = `执行命令时出错: ${error.message || '未知错误'}`;
                 }
 
-                // 直接发送非流式回复
+                // 发送命令执行结果
                 if (ws && ws.readyState === WebSocket.OPEN) {
+                    // 发送命令执行结果到Telegram
                     ws.send(JSON.stringify({ type: 'ai_reply', chatId: data.chatId, text: replyText }));
+
+                    // 发送命令执行状态反馈到服务器
+                    ws.send(JSON.stringify({
+                        type: 'command_executed',
+                        command: data.command,
+                        success: commandSuccess,
+                        message: replyText
+                    }));
                 }
+
                 return;
             }
         } catch (error) {

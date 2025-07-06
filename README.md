@@ -106,7 +106,7 @@ SillyTavern Telegram Connector 是一个为 SillyTavern 设计的扩展，允许
   - [ ] Bot信息解析方式改为HTML 
 
 - **架构优化**：
-  - [ ] 命令改为server处理，前端不再参与命令解析
+  - [x] 命令改为server处理，前端不再参与命令解析
   - [ ] 将server转换为标准服务端插件，遵循[SillyTavern服务端插件规范](https://docs.sillytavern.app/for-contributors/server-plugins/)
 
 - **用户体验改进**：

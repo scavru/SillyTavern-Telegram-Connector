@@ -7,7 +7,7 @@ const path = require('path');
 // 添加日志记录函数，带有时间戳
 function logWithTimestamp(level, ...args) {
     const now = new Date();
-    
+
     // 使用本地时区格式化时间
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -15,10 +15,10 @@ function logWithTimestamp(level, ...args) {
     const hours = String(now.getHours()).padStart(2, '0');
     const minutes = String(now.getMinutes()).padStart(2, '0');
     const seconds = String(now.getSeconds()).padStart(2, '0');
-    
+
     const timestamp = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
     const prefix = `[${timestamp}]`;
-    
+
     switch (level) {
         case 'error':
             console.error(prefix, ...args);
@@ -231,6 +231,127 @@ function handleSystemCommand(command, chatId) {
     sillyTavernClient.send(JSON.stringify({ type: 'system_command', command: 'reload_ui_only', chatId }));
 }
 
+// 处理Telegram命令
+async function handleTelegramCommand(command, args, chatId) {
+    logWithTimestamp('log', `处理Telegram命令: /${command} ${args.join(' ')}`);
+
+    // 显示"输入中"状态
+    bot.sendChatAction(chatId, 'typing').catch(error =>
+        logWithTimestamp('error', '发送"输入中"状态失败:', error));
+
+    // 默认回复
+    let replyText = `未知命令: /${command}。 使用 /help 查看所有命令。`;
+
+    // 检查SillyTavern是否连接
+    if (!sillyTavernClient || sillyTavernClient.readyState !== WebSocket.OPEN) {
+        bot.sendMessage(chatId, 'SillyTavern未连接，无法执行命令。');
+        return;
+    }
+
+    // 根据命令类型处理
+    switch (command) {
+        case 'help':
+            replyText = `SillyTavern Telegram Bridge 命令：\n\n`;
+            replyText += `聊天管理\n`;
+            replyText += `/new - 开始与当前角色的新聊天。\n`;
+            replyText += `/listchats - 列出当前角色的所有已保存的聊天记录。\n`;
+            replyText += `/switchchat <chat_name> - 加载特定的聊天记录。\n`;
+            replyText += `/switchchat_<序号> - 通过序号加载聊天记录。\n\n`;
+            replyText += `角色管理\n`;
+            replyText += `/listchars - 列出所有可用角色。\n`;
+            replyText += `/switchchar <char_name> - 切换到指定角色。\n`;
+            replyText += `/switchchar_<序号> - 通过序号切换角色。\n\n`;
+            replyText += `系统管理\n`;
+            replyText += `/reload - 重载插件的服务器端组件并刷新ST网页。\n`;
+            replyText += `/restart - 刷新ST网页并重启插件的服务器端组件。\n`;
+            replyText += `/exit - 退出插件的服务器端组件。\n`;
+            replyText += `/ping - 检查连接状态。\n\n`;
+            replyText += `帮助\n`;
+            replyText += `/help - 显示此帮助信息。`;
+            break;
+        case 'new':
+            // 发送命令到前端执行
+            sillyTavernClient.send(JSON.stringify({
+                type: 'execute_command',
+                command: 'new',
+                chatId: chatId
+            }));
+            return; // 前端会发送响应，所以这里直接返回
+        case 'listchars':
+            // 发送命令到前端执行
+            sillyTavernClient.send(JSON.stringify({
+                type: 'execute_command',
+                command: 'listchars',
+                chatId: chatId
+            }));
+            return;
+        case 'switchchar':
+            if (args.length === 0) {
+                replyText = '请提供角色名称或序号。用法: /switchchar <角色名称> 或 /switchchar_数字';
+            } else {
+                // 发送命令到前端执行
+                sillyTavernClient.send(JSON.stringify({
+                    type: 'execute_command',
+                    command: 'switchchar',
+                    args: args,
+                    chatId: chatId
+                }));
+                return;
+            }
+            break;
+        case 'listchats':
+            // 发送命令到前端执行
+            sillyTavernClient.send(JSON.stringify({
+                type: 'execute_command',
+                command: 'listchats',
+                chatId: chatId
+            }));
+            return;
+        case 'switchchat':
+            if (args.length === 0) {
+                replyText = '请提供聊天记录名称。用法： /switchchat <聊天记录名称>';
+            } else {
+                // 发送命令到前端执行
+                sillyTavernClient.send(JSON.stringify({
+                    type: 'execute_command',
+                    command: 'switchchat',
+                    args: args,
+                    chatId: chatId
+                }));
+                return;
+            }
+            break;
+        default:
+            // 处理特殊格式的命令，如 switchchar_1, switchchat_2 等
+            const charMatch = command.match(/^switchchar_(\d+)$/);
+            if (charMatch) {
+                // 发送命令到前端执行
+                sillyTavernClient.send(JSON.stringify({
+                    type: 'execute_command',
+                    command: command, // 保持原始命令格式
+                    chatId: chatId
+                }));
+                return;
+            }
+
+            const chatMatch = command.match(/^switchchat_(\d+)$/);
+            if (chatMatch) {
+                // 发送命令到前端执行
+                sillyTavernClient.send(JSON.stringify({
+                    type: 'execute_command',
+                    command: command, // 保持原始命令格式
+                    chatId: chatId
+                }));
+                return;
+            }
+    }
+
+    // 发送回复
+    bot.sendMessage(chatId, replyText).catch(err => {
+        logWithTimestamp('error', `发送命令回复失败: ${err.message}`);
+    });
+}
+
 // --- WebSocket服务器逻辑 ---
 wss.on('connection', ws => {
     logWithTimestamp('log', 'SillyTavern扩展已连接！');
@@ -387,6 +508,12 @@ wss.on('connection', ws => {
                 logWithTimestamp('log', `显示"输入中"状态给Telegram用户 ${data.chatId}`);
                 bot.sendChatAction(data.chatId, 'typing').catch(error =>
                     logWithTimestamp('error', '发送"输入中"状态失败:', error));
+            } else if (data.type === 'command_executed') {
+                // 处理前端命令执行结果
+                logWithTimestamp('log', `命令 ${data.command} 执行完成，结果: ${data.success ? '成功' : '失败'}`);
+                if (data.message) {
+                    logWithTimestamp('log', `命令执行消息: ${data.message}`);
+                }
             }
         } catch (error) {
             logWithTimestamp('error', '处理SillyTavern消息时出错:', error);
@@ -460,25 +587,23 @@ bot.on('message', (msg) => {
     if (text.startsWith('/')) {
         const parts = text.slice(1).trim().split(/\s+/);
         const command = parts[0].toLowerCase();
+        const args = parts.slice(1);
 
+        // 系统命令由服务器直接处理
         if (['reload', 'restart', 'exit', 'ping'].includes(command)) {
             handleSystemCommand(command, chatId);
             return;
         }
+
+        // 其他命令也由服务器处理，但可能需要前端执行
+        handleTelegramCommand(command, args, chatId);
+        return;
     }
 
+    // 处理普通消息
     if (sillyTavernClient && sillyTavernClient.readyState === WebSocket.OPEN) {
-        let payload;
-        if (text.startsWith('/')) {
-            logWithTimestamp('log', `从Telegram用户 ${chatId} 收到命令: "${text}"`);
-            const parts = text.slice(1).trim().split(/\s+/);
-            const command = parts[0].toLowerCase();
-            const args = parts.slice(1);
-            payload = JSON.stringify({ type: 'command_request', chatId, command, args });
-        } else {
-            logWithTimestamp('log', `从Telegram用户 ${chatId} 收到消息: "${text}"`);
-            payload = JSON.stringify({ type: 'user_message', chatId, text });
-        }
+        logWithTimestamp('log', `从Telegram用户 ${chatId} 收到消息: "${text}"`);
+        const payload = JSON.stringify({ type: 'user_message', chatId, text });
         sillyTavernClient.send(payload);
     } else {
         logWithTimestamp('warn', '收到Telegram消息，但SillyTavern扩展未连接。');
