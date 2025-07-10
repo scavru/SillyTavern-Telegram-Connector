@@ -27,6 +27,7 @@ const MODULE_NAME = 'SillyTavern-Telegram-Connector';
 const DEFAULT_SETTINGS = {
     bridgeUrl: 'ws://127.0.0.1:2333',
     autoConnect: true,
+    enableTranslation: true, // Добавляем новую настройку
 };
 
 let ws = null; // Экземпляр WebSocket
@@ -120,6 +121,7 @@ function connect() {
                             type: 'stream_chunk',
                             chatId: data.chatId,
                             text: cumulativeText,
+                            enableTranslation: getSettings().enableTranslation // Добавляем флаг перевода
                         }));
                     }
                 };
@@ -131,7 +133,11 @@ function connect() {
                     if (ws && ws.readyState === WebSocket.OPEN && isStreamingMode) {
                         // Отправка stream_end только если нет ошибок и режим потоковый
                         if (!data.error) {
-                            ws.send(JSON.stringify({ type: 'stream_end', chatId: data.chatId }));
+                            ws.send(JSON.stringify({ 
+                                type: 'stream_end', 
+                                chatId: data.chatId,
+                                enableTranslation: getSettings().enableTranslation // Добавляем флаг перевода
+                            }));
                         }
                     }
                     // Не сбрасываем isStreamingMode здесь, это сделает handleFinalMessage
@@ -142,7 +148,7 @@ function connect() {
                 // Слушатель остановки генерации
                 eventSource.once(event_types.GENERATION_STOPPED, cleanup);
 
-                // 6. Запуск процесса генерации в SillyTavern
+                // 6. Запаривание процесса генерации в SillyTavern
                 try {
                     const abortController = new AbortController();
                     setExternalAbortController(abortController);
@@ -161,6 +167,7 @@ function connect() {
                             type: 'error_message',
                             chatId: data.chatId,
                             text: errorMessage,
+                            enableTranslation: getSettings().enableTranslation // Добавляем флаг перевода
                         }));
                     }
 
@@ -327,14 +334,20 @@ function connect() {
                 // Отправка результата выполнения команды
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     // Отправка результата в Telegram
-                    ws.send(JSON.stringify({ type: 'ai_reply', chatId: data.chatId, text: replyText }));
+                    ws.send(JSON.stringify({ 
+                        type: 'ai_reply', 
+                        chatId: data.chatId, 
+                        text: replyText,
+                        enableTranslation: getSettings().enableTranslation // Добавляем флаг перевода
+                    }));
 
                     // Отправка статуса выполнения команды на сервер
                     ws.send(JSON.stringify({
                         type: 'command_executed',
                         command: data.command,
                         success: commandSuccess,
-                        message: replyText
+                        message: replyText,
+                        enableTranslation: getSettings().enableTranslation // Добавляем флаг перевода
                     }));
                 }
 
@@ -343,7 +356,12 @@ function connect() {
         } catch (error) {
             console.error('[Telegram Bridge] Ошибка при обработке запроса:', error);
             if (data && data.chatId && ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: 'error_message', chatId: data.chatId, text: 'Произошла внутренняя ошибка при обработке вашего запроса.' }));
+                ws.send(JSON.stringify({ 
+                    type: 'error_message', 
+                    chatId: data.chatId, 
+                    text: 'Произошла внутренняя ошибка при обработке вашего запроса.',
+                    enableTranslation: getSettings().enableTranslation // Добавляем флаг перевода
+                }));
             }
         }
     };
@@ -378,6 +396,7 @@ jQuery(async () => {
         const settings = getSettings();
         $('#telegram_bridge_url').val(settings.bridgeUrl);
         $('#telegram_auto_connect').prop('checked', settings.autoConnect);
+        $('#telegram_enable_translation').prop('checked', settings.enableTranslation); // Инициализация галочки перевода
 
         $('#telegram_bridge_url').on('input', () => {
             const settings = getSettings();
@@ -390,6 +409,13 @@ jQuery(async () => {
             const settings = getSettings();
             settings.autoConnect = $(this).prop('checked');
             console.log(`[Telegram Bridge] Автоматическое подключение изменено на: ${settings.autoConnect}`);
+            saveSettingsDebounced();
+        });
+
+        $('#telegram_enable_translation').on('change', function () {
+            const settings = getSettings();
+            settings.enableTranslation = $(this).prop('checked');
+            console.log(`[Telegram Bridge] Перевод сообщений изменён на: ${settings.enableTranslation}`);
             saveSettingsDebounced();
         });
 
@@ -450,6 +476,7 @@ function handleFinalMessage(lastMessageIdInChatArray) {
                         type: 'final_message_update',
                         chatId: lastProcessedChatId,
                         text: renderedText,
+                        enableTranslation: getSettings().enableTranslation // Добавляем флаг перевода
                     }));
                     // Сброс флага потокового режима
                     isStreamingMode = false;
@@ -459,6 +486,7 @@ function handleFinalMessage(lastMessageIdInChatArray) {
                         type: 'ai_reply',
                         chatId: lastProcessedChatId,
                         text: renderedText,
+                        enableTranslation: getSettings().enableTranslation // Добавляем флаг перевода
                     }));
                 }
 
