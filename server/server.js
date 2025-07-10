@@ -9,19 +9,35 @@ const axios = require('axios');
 async function sendLongMessage(bot, chatId, text) {
     const MAX_MESSAGE_LENGTH = 4096;
     if (text.length <= MAX_MESSAGE_LENGTH) {
-        await bot.sendMessage(chatId, text).catch(err => {
+        try {
+            await bot.sendMessage(chatId, text);
+        } catch (err) {
             logWithTimestamp('error', `Ошибка отправки сообщения в Telegram: ${err.message}`);
-        });
+            if (err.response && err.response.statusCode === 429) {
+                const retryAfter = err.response.body.parameters.retry_after || 3;
+                logWithTimestamp('warn', `Rate limit hit, retrying after ${retryAfter} seconds`);
+                await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+                await bot.sendMessage(chatId, text);
+            }
+        }
     } else {
         const parts = [];
         for (let i = 0; i < text.length; i += MAX_MESSAGE_LENGTH) {
             parts.push(text.slice(i, i + MAX_MESSAGE_LENGTH));
         }
         for (const part of parts) {
-            await bot.sendMessage(chatId, part).catch(err => {
+            try {
+                await bot.sendMessage(chatId, part);
+                await new Promise(resolve => setTimeout(resolve, 500));
+            } catch (err) {
                 logWithTimestamp('error', `Ошибка отправки части сообщения в Telegram: ${err.message}`);
-            });
-            await new Promise(resolve => setTimeout(resolve, 500));
+                if (err.response && err.response.statusCode === 429) {
+                    const retryAfter = err.response.body.parameters.retry_after || 3;
+                    logWithTimestamp('warn', `Rate limit hit, retrying after ${retryAfter} seconds`);
+                    await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+                    await bot.sendMessage(chatId, part);
+                }
+            }
         }
     }
 }
@@ -365,7 +381,7 @@ async function handleTelegramCommand(command, args, chatId) {
         replyText = `Команды SillyTavern Telegram Bridge:\n\n`;
         replyText += `Управление чатами\n`;
         replyText += `/new - Начать новый чат с текущим персонажем.\n`;
-        replyText += `/listchats - Показать все сохранённые чаты текущего персонажа.\n`;
+        replyText += `/listchats - Показать все сохранённые чаты текущего чата.\n`;
         replyText += `/switchchat <имя_чата> - Загрузить указанный чат.\n`;
         replyText += `/switchchat_<номер> - Загрузить чат по номеру.\n\n`;
         replyText += `Управление персонажами\n`;
@@ -378,7 +394,7 @@ async function handleTelegramCommand(command, args, chatId) {
         replyText += `/exit - Завершить работу серверных компонентов.\n`;
         replyText += `/ping - Проверить статус подключения.\n\n`;
         replyText += `Помощь\n`;
-        replyText += `/help - Показать эту справку.`;
+        replyText += `/help - Показать эту справку.\n`;
         await sendLongMessage(bot, chatId, replyText);
         return;
     }
@@ -468,26 +484,27 @@ wss.on('connection', ws => {
 
             // Игнорируем потоковые сообщения
             if (data.type === 'stream_chunk' || data.type === 'stream_end') {
+                logWithTimestamp('log', `Игнорируется ${data.type} для ChatID ${data.chatId}`);
                 return;
             }
 
             // Обработка финального сообщения
             if (data.type === 'final_message_update' && data.chatId) {
                 logWithTimestamp('log', `Получен финальный текст для ChatID ${data.chatId}`);
-                const translatedText = await translateText(data.text);
-                await sendLongMessage(bot, data.chatId, translatedText);
+                const textToSend = data.enableTranslation ? await translateText(data.text) : data.text;
+                await sendLongMessage(bot, data.chatId, textToSend);
                 return;
             }
 
             // Обработка других типов сообщений
             if (data.type === 'error_message' && data.chatId) {
                 logWithTimestamp('error', `Ошибка от SillyTavern, отправка пользователю Telegram ${data.chatId}: ${data.text}`);
-                const translatedText = await translateText(data.text);
-                await sendLongMessage(bot, data.chatId, translatedText);
+                const textToSend = data.enableTranslation ? await translateText(data.text) : data.text;
+                await sendLongMessage(bot, data.chatId, textToSend);
             } else if (data.type === 'ai_reply' && data.chatId) {
                 logWithTimestamp('log', `Получен ответ AI, отправка пользователю Telegram ${data.chatId}`);
-                const translatedText = await translateText(data.text);
-                await sendLongMessage(bot, data.chatId, translatedText);
+                const textToSend = data.enableTranslation ? await translateText(data.text) : data.text;
+                await sendLongMessage(bot, data.chatId, textToSend);
             } else if (data.type === 'typing_action' && data.chatId) {
                 logWithTimestamp('log', `Отправка статуса "печатает" пользователю Telegram ${data.chatId}`);
                 bot.sendChatAction(data.chatId, 'typing').catch(error =>
@@ -496,8 +513,8 @@ wss.on('connection', ws => {
                 logWithTimestamp('log', `Команда ${data.command} выполнена, результат: ${data.success ? 'успех' : 'ошибка'}`);
                 if (data.message) {
                     logWithTimestamp('log', `Сообщение выполнения команды: ${data.message}`);
-                    const translatedMessage = await translateText(data.message);
-                    await sendLongMessage(bot, data.chatId, translatedMessage);
+                    const textToSend = data.enableTranslation ? await translateText(data.message) : data.message;
+                    await sendLongMessage(bot, data.chatId, textToSend);
                 }
             }
         } catch (error) {
@@ -511,8 +528,8 @@ wss.on('connection', ws => {
             const { command, chatId } = ws.commandToExecuteOnClose;
             logWithTimestamp('log', `Клиент отключён, выполнение запланированной команды: ${command}`);
             if (command === 'reload') reloadServer(chatId);
-            if (command === 'restart') restartServer(chatId);
-            if (command === 'exit') exitServer(chatId);
+            else if (command === 'restart') restartServer(chatId);
+            else if (command === 'exit') exitServer();
         }
         sillyTavernClient = null;
     });
@@ -531,7 +548,7 @@ if (process.env.RESTART_NOTIFY_CHATID) {
     if (!isNaN(chatId)) {
         setTimeout(() => {
             bot.sendMessage(chatId, 'Серверные компоненты успешно перезапущены и готовы к работе.')
-                .catch(err => logWithTimestamp('error', 'Ошибка отправки уведомления о перезапуске:', err))
+                .catch(err => logWithTimestamp('error', 'Ошибка отправки уведомления о перезапуске:', err.message))
                 .finally(() => {
                     delete process.env.RESTART_NOTIFY_CHATID;
                 });
@@ -569,6 +586,6 @@ bot.on('message', async (msg) => {
         sillyTavernClient.send(payload);
     } else {
         logWithTimestamp('warn', 'Получено сообщение Telegram, но расширение SillyTavern не подключено.');
-        await sendLongMessage(bot, chatId, 'Извините, сейчас нет подключения к SillyTavern. Убедитесь, что SillyTavern запущен и расширение Telegram включено.');
+        await sendLongMessage(bot, chatId, 'Извините, сейчас нет соединения к SillyTavern. Убедитесь, что SillyTavern запущен и расширение Telegram включено.');
     }
 });
