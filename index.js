@@ -21,68 +21,7 @@ const DEFAULT_SETTINGS = {
     bridgeUrl: 'ws://127.0.0.1:2333',
     autoConnect: true,
     enableTranslation: true,
-    language: 'ru', // Default to Russian for consistency
 };
-
-// Translations for command responses
-const translations = {
-    ru: {
-        new_success: 'Новая беседа начата.',
-        listchars_empty: 'Персонажи не найдены.',
-        listchars_list: 'Список доступных персонажей:\n\n',
-        listchars_instruction: '\nИспользуйте /switchchar_номер или /switchchar имя_персонажа для переключения',
-        switchchar_no_args: 'Укажите имя или номер персонажа. Использование: /switchchar <имя_персонажа> или /switchchar_номер',
-        switchchar_success: 'Переключено на персонажа "{{name}}".',
-        switchchar_not_found: 'Персонаж "{{name}}" не найден.',
-        listchats_no_character: 'Сначала выберите персонажа.',
-        listchats_empty: 'У текущего персонажа нет истории бесед.',
-        listchats_list: 'История бесед текущего персонажа:\n\n',
-        listchats_instruction: '\nИспользуйте /switchchat_номер или /switchchat имя_беседы для переключения',
-        switchchat_no_args: 'Укажите имя беседы. Использование: /switchchat <имя_беседы>',
-        switchchat_success: 'Загружена беседа: {{name}}',
-        switchchat_failed: 'Не удалось загрузить беседу "{{name}}". Проверьте правильность имени.',
-        switchchar_invalid_number: 'Неверный номер персонажа: {{number}}. Используйте /listchars для просмотра доступных персонажей.',
-        switchchat_invalid_number: 'Неверный номер беседы: {{number}}. Используйте /listchats для просмотра доступных бесед.',
-        unknown_command: 'Неизвестная команда: /{{command}}. Используйте /help для просмотра всех команд.',
-        error: 'Ошибка при выполнении команды: {{error}}',
-        new_chat_error: 'Новая беседа создана, но элемент первого сообщения не найден в DOM.',
-        new_chat_empty: 'Новая беседа создана, но первое сообщение пустое.',
-        internal_error: 'Произошла внутренняя ошибка при обработке вашего запроса.'
-    },
-    en: {
-        new_success: 'New chat started.',
-        listchars_empty: 'No characters found.',
-        listchars_list: 'List of available characters:\n\n',
-        listchars_instruction: '\nUse /switchchar_number or /switchchar character_name to switch',
-        switchchar_no_args: 'Specify a character name or number. Usage: /switchchar <character_name> or /switchchar_number',
-        switchchar_success: 'Switched to character "{{name}}".',
-        switchchar_not_found: 'Character "{{name}}" not found.',
-        listchats_no_character: 'Select a character first.',
-        listchats_empty: 'No chat history for the current character.',
-        listchats_list: 'Chat history for the current character:\n\n',
-        listchats_instruction: '\nUse /switchchat_number or /switchchat chat_name to switch',
-        switchchat_no_args: 'Specify a chat name. Usage: /switchchat <chat_name>',
-        switchchat_success: 'Loaded chat: {{name}}',
-        switchchat_failed: 'Failed to load chat "{{name}}". Check the name.',
-        switchchar_invalid_number: 'Invalid character number: {{number}}. Use /listchars to view available characters.',
-        switchchat_invalid_number: 'Invalid chat number: {{number}}. Use /listchats to view available chats.',
-        unknown_command: 'Unknown command: /{{command}}. Use /help for a list of commands.',
-        error: 'Error executing command: {{error}}',
-        new_chat_error: 'New chat created, but the first message element was not found in the DOM.',
-        new_chat_empty: 'New chat created, but the first message is empty.',
-        internal_error: 'An internal error occurred while processing your request.'
-    }
-};
-
-// Function to get translated message
-function getTranslatedMessage(language, key, params = {}) {
-    const lang = language === 'ru' ? 'ru' : 'en';
-    let message = translations[lang][key] || translations.en[key] || key;
-    for (const [param, value] of Object.entries(params)) {
-        message = message.replace(`{{${param}}}`, value);
-    }
-    return message;
-}
 
 let ws = null;
 let lastProcessedChatId = null;
@@ -95,29 +34,49 @@ function getSettings() {
     return extensionSettings[MODULE_NAME];
 }
 
+async function translateText(text) {
+    try {
+        console.log(`[Telegram Bridge] Sending text for translation: "${text.slice(0, 100)}${text.length > 100 ? '...' : ''}"`);
+        const params = new URLSearchParams({
+            text: text,
+            from_lang: 'en',
+            to_lang: 'ru'
+        });
+        const response = await fetch(`http://127.0.0.1:4990/translate?${params.toString()}`, {
+            method: 'GET'
+        });
+        if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}`);
+        }
+        const data = await response.json();
+        const translatedText = data.result || text;
+        console.log(`[Telegram Bridge] Received translated text: "${translatedText.slice(0, 100)}${translatedText.length > 100 ? '...' : ''}"`);
+        return translatedText;
+    } catch (error) {
+        console.error('[Telegram Bridge] Translation error:', error);
+        return text; // Return original text on error
+    }
+}
+
 function updateStatus(message, color) {
     const statusEl = document.getElementById('telegram_connection_status');
     if (statusEl) {
         const translatedMessages = {
-            'URL 未设置！': getTranslatedMessage('ru', 'url_not_set') || 'URL не указан!',
-            '连接中...': getTranslatedMessage('ru', 'connecting') || 'Подключение...',
-            '已连接': getTranslatedMessage('ru', 'connected') || 'Подключено',
-            '连接已断开': getTranslatedMessage('ru', 'disconnected') || 'Соединение разорвано',
-            '连接错误': getTranslatedMessage('ru', 'connection_error') || 'Ошибка подключения'
+            'URL 未设置！': 'URL не указан!',
+            '连接中...': 'Подключение...',
+            '已连接': 'Подключено',
+            '连接已断开': 'Соединение разорвано',
+            '连接 ошибки': 'Ошибка подключения'
         };
         statusEl.textContent = `Статус: ${translatedMessages[message] || message}`;
         statusEl.style.color = color;
+    } else {
+        console.error('[Telegram Bridge] Status element not found in settings HTML');
     }
 }
 
 function reloadPage() {
     window.location.reload();
-}
-
-async function translateText(text, language) {
-    const response = await fetch(`http://127.0.0.1:4990/translate?text=${encodeURIComponent(text)}&from_lang=en&to_lang=${language}`);
-    const data = await response.json();
-    return data.result || text;
 }
 
 function connect() {
@@ -146,9 +105,6 @@ function connect() {
         let data;
         try {
             data = JSON.parse(event.data);
-            // Ensure language is set from settings if not provided
-            const language = data.language || getSettings().language || 'ru';
-            data.language = language;
 
             if (data.type === 'user_message') {
                 console.log('[Telegram Bridge] Получено пользовательское сообщение.', data);
@@ -168,8 +124,7 @@ function connect() {
                             type: 'stream_chunk',
                             chatId: data.chatId,
                             text: cumulativeText,
-                            enableTranslation: getSettings().enableTranslation,
-                            language: language
+                            translate: getSettings().enableTranslation
                         }));
                     }
                 };
@@ -179,12 +134,7 @@ function connect() {
                     eventSource.removeListener(event_types.STREAM_TOKEN_RECEIVED, streamCallback);
                     if (ws && ws.readyState === WebSocket.OPEN && isStreamingMode) {
                         if (!data.error) {
-                            ws.send(JSON.stringify({ 
-                                type: 'stream_end', 
-                                chatId: data.chatId,
-                                enableTranslation: getSettings().enableTranslation,
-                                language: language
-                            }));
+                            ws.send(JSON.stringify({ type: 'stream_end', chatId: data.chatId }));
                         }
                     }
                 };
@@ -200,14 +150,14 @@ function connect() {
                     console.error("[Telegram Bridge] Ошибка в Generate():", error);
                     await deleteLastMessage();
                     console.log('[Telegram Bridge] Удалено пользовательское сообщение, вызвавшее ошибку.');
-                    const errorMessage = getTranslatedMessage(language, 'error', { error: error.message || 'Неизвестная ошибка' });
+
+                    const errorMessage = `Извините, произошла ошибка при генерации ответа AI.\nВаше последнее сообщение было удалено, пожалуйста, попробуйте снова или отправьте другое сообщение.\n\nДетали ошибки: ${error.message || 'Неизвестная ошибка'}`;
                     if (ws && ws.readyState === WebSocket.OPEN) {
                         ws.send(JSON.stringify({
                             type: 'error_message',
                             chatId: data.chatId,
                             text: errorMessage,
-                            enableTranslation: getSettings().enableTranslation,
-                            language: language
+                            translate: getSettings().enableTranslation
                         }));
                     }
                     data.error = true;
@@ -227,149 +177,127 @@ function connect() {
 
             if (data.type === 'execute_command') {
                 console.log('[Telegram Bridge] Выполнение команды', data);
-                if (ws && ws.readyState === WebSocket.OPEN) {
+                if (ws && ws.readyState === WebSocket.OPEN && data.chatId) {
                     ws.send(JSON.stringify({ type: 'typing_action', chatId: data.chatId }));
                 }
 
-                let replyText = getTranslatedMessage(data.language, 'unknown_command', { command: data.command });
-                let commandSuccess = false;
+                let replyText = 'Не удалось выполнить команду, попробуйте позже.';
                 const context = SillyTavern.getContext();
+                let commandSuccess = false;
+                const noTranslateCommands = ['listchars', 'listchats', 'switchchar'];
+                const isNoTranslateCommand = noTranslateCommands.includes(data.command) || 
+                                            data.command.match(/^switchchar_\d+$/) || 
+                                            data.command.match(/^switchchat_\d+$/);
 
                 try {
                     switch (data.command) {
-                        case 'new':
+                        case 'new': {
                             await doNewChat({ deleteCurrentChat: false });
-                            replyText = getTranslatedMessage(data.language, 'new_success');
+                            replyText = 'Новая беседа начата.';
                             commandSuccess = true;
-                            setTimeout(() => {
-                                console.log('[Telegram Bridge] Проверяем DOM для первого сообщения...');
-                                const chatContainer = document.querySelector("#chat > div");
-                                if (!chatContainer) {
-                                    console.log('[Telegram Bridge] Контейнер чата (#chat > div) не найден.');
-                                    if (ws && ws.readyState === WebSocket.OPEN) {
-                                        ws.send(JSON.stringify({
-                                            type: 'error_message',
-                                            chatId: data.chatId,
-                                            text: getTranslatedMessage(data.language, 'new_chat_error'),
-                                            enableTranslation: getSettings().enableTranslation,
-                                            language: language
-                                        }));
-                                    }
-                                    return;
-                                }
 
-                                const messageElement = document.querySelector("#chat > div > div.mes_block > div.mes_text");
+                            // Capture the first message after creating a new chat
+                            setTimeout(async () => {
+                                console.log('[Telegram Bridge] Attempting to capture first message after /new');
+                                const messageElement = document.querySelector('#chat > div > div.mes_block > div.mes_text');
                                 if (messageElement) {
-                                    let renderedText = messageElement.innerHTML
+                                    let firstMessageText = messageElement.innerHTML
                                         .replace(/<br\s*\/?>/gi, '\n')
-                                        .replace(/<\/p>\s*<p>/gi, '\n\n');
+                                        .replace(/<\/p>\s*<p>/gi, '\n\n')
+                                        .replace(/ /g, ' ')
+                                        .replace(/&/g, '&')
+                                        .replace(/</g, '<')
+                                        .replace(/>/g, '>');
                                     const tempDiv = document.createElement('div');
-                                    tempDiv.innerHTML = renderedText;
-                                    renderedText = tempDiv.textContent || tempDiv.innerText || '';
+                                    tempDiv.innerHTML = firstMessageText;
+                                    firstMessageText = tempDiv.textContent.trim();
+                                    console.log(`[Telegram Bridge] Captured first message: "${firstMessageText.slice(0, 100)}${firstMessageText.length > 100 ? '...' : ''}"`);
 
-                                    if (renderedText.trim()) {
-                                        console.log(`[Telegram Bridge] Извлечено первое сообщение нового чата для chatId: ${data.chatId}: "${renderedText.slice(0, 100)}${renderedText.length > 100 ? '...' : ''}"`);
-                                        if (ws && ws.readyState === WebSocket.OPEN) {
-                                            ws.send(JSON.stringify({
-                                                type: 'new_chat_message',
-                                                chatId: data.chatId,
-                                                text: renderedText,
-                                                enableTranslation: getSettings().enableTranslation,
-                                                language: language
-                                            }));
-                                        }
+                                    if (firstMessageText && ws && ws.readyState === WebSocket.OPEN) {
+                                        console.log(`[Telegram Bridge] Sending ai_reply for chatId: ${data.chatId}, translate: ${getSettings().enableTranslation}`);
+                                        ws.send(JSON.stringify({
+                                            type: 'ai_reply',
+                                            chatId: data.chatId,
+                                            text: firstMessageText,
+                                            translate: getSettings().enableTranslation
+                                        }));
                                     } else {
-                                        console.log('[Telegram Bridge] Первое сообщение пустое.');
-                                        if (ws && ws.readyState === WebSocket.OPEN) {
-                                            ws.send(JSON.stringify({
-                                                type: 'error_message',
-                                                chatId: data.chatId,
-                                                text: getTranslatedMessage(data.language, 'new_chat_empty'),
-                                                enableTranslation: getSettings().enableTranslation,
-                                                language: language
-                                            }));
-                                        }
+                                        console.error('[Telegram Bridge] No first message found or WebSocket not open', {
+                                            hasMessage: !!firstMessageText,
+                                            wsState: ws?.readyState
+                                        });
                                     }
                                 } else {
-                                    console.log('[Telegram Bridge] Элемент первого сообщения (#chat > div > div.mes_block > div.mes_text) не найден в DOM.');
-                                    if (ws && ws.readyState === WebSocket.OPEN) {
-                                        ws.send(JSON.stringify({
-                                            type: 'error_message',
-                                            chatId: data.chatId,
-                                            text: getTranslatedMessage(data.language, 'new_chat_error'),
-                                            enableTranslation: getSettings().enableTranslation,
-                                            language: language
-                                        }));
-                                    }
+                                    console.error('[Telegram Bridge] Message element not found for new chat');
                                 }
-                            }, 1000);
+                            }, 1000); // Delay to ensure DOM update
                             break;
+                        }
                         case 'listchars': {
-                            const characters = context.characters && Array.isArray(context.characters) ? context.characters.slice(1) : [];
+                            const characters = context.characters.slice(1);
                             if (characters.length > 0) {
-                                replyText = getTranslatedMessage(data.language, 'listchars_list');
+                                replyText = 'Список доступных персонажей:\n\n';
                                 characters.forEach((char, index) => {
-                                    const charName = char.name || `Character ${index + 1}`;
-                                    replyText += `${index + 1}. /switchchar_${index + 1} - ${charName}\n`;
+                                    replyText += `${index + 1}. /switchchar_${index + 1} - ${char.name}\n`;
                                 });
-                                replyText += getTranslatedMessage(data.language, 'listchars_instruction');
+                                replyText += '\nИспользуйте /switchchar_номер или /switchchar имя_персонажа для переключения';
                             } else {
-                                replyText = getTranslatedMessage(data.language, 'listchars_empty');
+                                replyText = 'Персонажи не найдены.';
                             }
                             commandSuccess = true;
                             break;
                         }
                         case 'switchchar': {
                             if (!data.args || data.args.length === 0) {
-                                replyText = getTranslatedMessage(data.language, 'switchchar_no_args');
+                                replyText = 'Укажите имя или номер персонажа. Использование: /switchchar <имя_персонажа> или /switchchar_номер';
                                 break;
                             }
                             const targetName = data.args.join(' ');
-                            const characters = context.characters && Array.isArray(context.characters) ? context.characters : [];
+                            const characters = context.characters;
                             const targetChar = characters.find(c => c.name === targetName);
 
                             if (targetChar) {
                                 const charIndex = characters.indexOf(targetChar);
                                 await selectCharacterById(charIndex);
-                                replyText = getTranslatedMessage(data.language, 'switchchar_success', { name: targetName });
+                                replyText = `Переключено на персонажа "${targetName}".`;
                                 commandSuccess = true;
                             } else {
-                                replyText = getTranslatedMessage(data.language, 'switchchar_not_found', { name: targetName });
+                                replyText = `Персонаж "${targetName}" не найден.`;
                             }
                             break;
                         }
                         case 'listchats': {
-                            if (context.characterId === undefined || context.characterId === null) {
-                                replyText = getTranslatedMessage(data.language, 'listchats_no_character');
+                            if (context.characterId === undefined) {
+                                replyText = 'Сначала выберите персонажа.';
                                 break;
                             }
-                            const chatFiles = await getPastCharacterChats(context.characterId) || [];
+                            const chatFiles = await getPastCharacterChats(context.characterId);
                             if (chatFiles.length > 0) {
-                                replyText = getTranslatedMessage(data.language, 'listchats_list');
+                                replyText = 'История бесед текущего персонажа:\n\n';
                                 chatFiles.forEach((chat, index) => {
-                                    const chatName = chat.file_name ? chat.file_name.replace('.jsonl', '') : `Chat ${index + 1}`;
+                                    const chatName = chat.file_name.replace('.jsonl', '');
                                     replyText += `${index + 1}. /switchchat_${index + 1} - ${chatName}\n`;
                                 });
-                                replyText += getTranslatedMessage(data.language, 'listchats_instruction');
+                                replyText += '\nИспользуйте /switchchat_номер или /switchchat имя_беседы для переключения';
                             } else {
-                                replyText = getTranslatedMessage(data.language, 'listchats_empty');
+                                replyText = 'У текущего персонажа нет истории бесед.';
                             }
                             commandSuccess = true;
                             break;
                         }
                         case 'switchchat': {
                             if (!data.args || data.args.length === 0) {
-                                replyText = getTranslatedMessage(data.language, 'switchchat_no_args');
+                                replyText = 'Укажите имя беседы. Использование: /switchchat <имя_беседы>';
                                 break;
                             }
                             const targetChatFile = `${data.args.join(' ')}`;
                             try {
                                 await openCharacterChat(targetChatFile);
-                                replyText = getTranslatedMessage(data.language, 'switchchat_success', { name: targetChatFile });
+                                replyText = `Загружена беседа: ${targetChatFile}`;
                                 commandSuccess = true;
                             } catch (err) {
                                 console.error(err);
-                                replyText = getTranslatedMessage(data.language, 'switchchat_failed', { name: targetChatFile });
+                                replyText = `Не удалось загрузить беседу "${targetChatFile}". Проверьте правильность имени.`;
                             }
                             break;
                         }
@@ -377,62 +305,62 @@ function connect() {
                             const charMatch = data.command.match(/^switchchar_(\d+)$/);
                             if (charMatch) {
                                 const index = parseInt(charMatch[1]) - 1;
-                                const characters = context.characters && Array.isArray(context.characters) ? context.characters.slice(1) : [];
+                                const characters = context.characters.slice(1);
                                 if (index >= 0 && index < characters.length) {
                                     const targetChar = characters[index];
                                     const charIndex = context.characters.indexOf(targetChar);
                                     await selectCharacterById(charIndex);
-                                    replyText = getTranslatedMessage(data.language, 'switchchar_success', { name: targetChar.name || `Character ${index + 1}` });
+                                    replyText = `Переключено на персонажа "${targetChar.name}".`;
                                     commandSuccess = true;
                                 } else {
-                                    replyText = getTranslatedMessage(data.language, 'switchchar_invalid_number', { number: index + 1 });
+                                    replyText = `Неверный номер персонажа: ${index + 1}. Используйте /listchars для просмотра доступных персонажей.`;
                                 }
                                 break;
                             }
 
                             const chatMatch = data.command.match(/^switchchat_(\d+)$/);
                             if (chatMatch) {
-                                if (context.characterId === undefined || context.characterId === null) {
-                                    replyText = getTranslatedMessage(data.language, 'listchats_no_character');
+                                if (context.characterId === undefined) {
+                                    replyText = 'Сначала выберите персонажа.';
                                     break;
                                 }
                                 const index = parseInt(chatMatch[1]) - 1;
-                                const chatFiles = await getPastCharacterChats(context.characterId) || [];
+                                const chatFiles = await getPastCharacterChats(context.characterId);
+
                                 if (index >= 0 && index < chatFiles.length) {
                                     const targetChat = chatFiles[index];
-                                    const chatName = targetChat.file_name ? targetChat.file_name.replace('.jsonl', '') : `Chat ${index + 1}`;
+                                    const chatName = targetChat.file_name.replace('.jsonl', '');
                                     try {
                                         await openCharacterChat(chatName);
-                                        replyText = getTranslatedMessage(data.language, 'switchchat_success', { name: chatName });
+                                        replyText = `Загружена беседа: ${chatName}`;
                                         commandSuccess = true;
                                     } catch (err) {
                                         console.error(err);
-                                        replyText = getTranslatedMessage(data.language, 'switchchat_failed', { name: chatName });
+                                        replyText = `Не удалось загрузить беседу.`;
                                     }
                                 } else {
-                                    replyText = getTranslatedMessage(data.language, 'switchchat_invalid_number', { number: index + 1 });
+                                    replyText = `Неверный номер беседы: ${index + 1}. Используйте /listchats для просмотра доступных бесед.`;
                                 }
                                 break;
                             }
 
-                            replyText = getTranslatedMessage(data.language, 'unknown_command', { command: data.command });
+                            replyText = `Неизвестная команда: /${data.command}. Используйте /help для просмотра всех команд.`;
                         }
                     }
                 } catch (error) {
                     console.error('[Telegram Bridge] Ошибка при выполнении команды:', error);
-                    replyText = getTranslatedMessage(data.language, 'error', { error: error.message || 'Неизвестная ошибка' });
+                    replyText = `Ошибка при выполнении команды: ${error.message || 'Неизвестная ошибка'}`;
                 }
 
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    const translationEnabled = ['listchars', 'switchchar'].includes(data.command) || /^switchchar_\d+$/.test(data.command) ? false : getSettings().enableTranslation;
-                    ws.send(JSON.stringify({
-                        type: 'command_executed',
-                        command: data.command,
-                        success: commandSuccess,
-                        message: replyText,
-                        enableTranslation: translationEnabled,
-                        language: language
+                if (ws && ws.readyState === WebSocket.OPEN && data.chatId) {
+                    ws.send(JSON.stringify({ 
+                        type: 'ai_reply', 
+                        chatId: data.chatId, 
+                        text: replyText, 
+                        translate: isNoTranslateCommand ? false : getSettings().enableTranslation 
                     }));
+                } else {
+                    console.error('[Telegram Bridge] Не удалось отправить ответ: WebSocket не активен или chatId отсутствует', { wsState: ws?.readyState, chatId: data.chatId });
                 }
 
                 return;
@@ -443,9 +371,8 @@ function connect() {
                 ws.send(JSON.stringify({ 
                     type: 'error_message', 
                     chatId: data.chatId, 
-                    text: getTranslatedMessage(data.language, 'internal_error'),
-                    enableTranslation: getSettings().enableTranslation,
-                    language: language
+                    text: 'Произошла внутренняя ошибка при обработке вашего запроса.', 
+                    translate: getSettings().enableTranslation 
                 }));
             }
         }
@@ -471,42 +398,55 @@ function disconnect() {
 }
 
 jQuery(async () => {
-    console.log('[Telegram Bridge] Попытка загрузки интерфейса настроек...');
+    console.log('[Telegram Bridge] Attempting to load settings UI...');
     try {
-        const settingsHtml = await $.get(`/scripts/extensions/third-party/${MODULE_NAME}/settings.html`);
-        $('#extensions_settings').append(settingsHtml);
-        console.log('[Telegram Bridge] Интерфейс настроек добавлен.');
+        const settingsPath = `/scripts/extensions/third-party/${MODULE_NAME}/settings.html`;
+        console.log(`[Telegram Bridge] Fetching settings from: ${settingsPath}`);
+        const settingsHtml = await $.get(settingsPath);
+        const extensionsSettings = $('#extensions_settings');
+        if (extensionsSettings.length === 0) {
+            console.error('[Telegram Bridge] Extensions settings container (#extensions_settings) not found in DOM');
+            return;
+        }
+        extensionsSettings.append(settingsHtml);
+        console.log('[Telegram Bridge] Settings UI appended successfully.');
 
         const settings = getSettings();
-        $('#telegram_bridge_url').val(settings.bridgeUrl);
-        $('#telegram_auto_connect').prop('checked', settings.autoConnect);
-        $('#telegram_enable_translation').prop('checked', settings.enableTranslation);
-        $('#telegram_language_select').val(settings.language);
+        const bridgeUrlInput = $('#telegram_bridge_url');
+        const autoConnectCheckbox = $('#telegram_auto_connect_checkbox');
+        const translationCheckbox = $('#telegram_enable_translation');
 
-        $('#telegram_bridge_url').on('input', () => {
+        if (bridgeUrlInput.length === 0 || autoConnectCheckbox.length === 0 || translationCheckbox.length === 0) {
+            console.error('[Telegram Bridge] One or more settings elements not found:', {
+                bridgeUrl: !!bridgeUrlInput.length,
+                autoConnect: !!autoConnectCheckbox.length,
+                translation: !!translationCheckbox.length
+            });
+            return;
+        }
+
+        bridgeUrlInput.val(settings.bridgeUrl);
+        autoConnectCheckbox.prop('checked', settings.autoConnect);
+        translationCheckbox.prop('checked', settings.enableTranslation);
+
+        bridgeUrlInput.on('input', () => {
             const settings = getSettings();
-            settings.bridgeUrl = $('#telegram_bridge_url').val();
+            settings.bridgeUrl = bridgeUrlInput.val();
+            console.log(`[Telegram Bridge] Bridge URL updated to: ${settings.bridgeUrl}`);
             saveSettingsDebounced();
         });
 
-        $('#telegram_auto_connect').on('change', function () {
+        autoConnectCheckbox.on('change', function () {
             const settings = getSettings();
             settings.autoConnect = $(this).prop('checked');
-            console.log(`[Telegram Bridge] Автоматическое подключение изменено на: ${settings.autoConnect}`);
+            console.log(`[Telegram Bridge] Auto-connect changed to: ${settings.autoConnect}`);
             saveSettingsDebounced();
         });
 
-        $('#telegram_enable_translation').on('change', function () {
+        translationCheckbox.on('change', function () {
             const settings = getSettings();
             settings.enableTranslation = $(this).prop('checked');
-            console.log(`[Telegram Bridge] Перевод сообщений изменён на: ${settings.enableTranslation}`);
-            saveSettingsDebounced();
-        });
-
-        $('#telegram_language_select').on('change', function () {
-            const settings = getSettings();
-            settings.language = $(this).val();
-            console.log(`[Telegram Bridge] Язык изменён на: ${settings.language}`);
+            console.log(`[Telegram Bridge] Translation changed to: ${settings.enableTranslation}`);
             saveSettingsDebounced();
         });
 
@@ -514,13 +454,14 @@ jQuery(async () => {
         $('#telegram_disconnect_button').on('click', disconnect);
 
         if (settings.autoConnect) {
-            console.log('[Telegram Bridge] Автоматическое подключение включено, подключаемся...');
+            console.log('[Telegram Bridge] Auto-connect enabled, connecting...');
             connect();
         }
+
     } catch (error) {
-        console.error('[Telegram Bridge] Не удалось загрузить HTML настроек.', error);
+        console.error('[Telegram Bridge] Failed to load settings HTML:', error);
     }
-    console.log('[Telegram Bridge] Расширение загружено.');
+    console.log('[Telegram Bridge] Extension loaded.');
 });
 
 function handleFinalMessage(lastMessageIdInChatArray) {
@@ -533,7 +474,7 @@ function handleFinalMessage(lastMessageIdInChatArray) {
 
     setTimeout(() => {
         const context = SillyTavern.getContext();
-        const lastMessage = context.chat && Array.isArray(context.chat) && context.chat[lastMessageIndex];
+        const lastMessage = context.chat[lastMessageIndex];
 
         if (lastMessage && !lastMessage.is_user && !lastMessage.is_system) {
             const messageElement = $(`#chat .mes[mesid="${lastMessageIndex}"]`);
@@ -542,20 +483,24 @@ function handleFinalMessage(lastMessageIdInChatArray) {
                 const messageTextElement = messageElement.find('.mes_text');
                 let renderedText = messageTextElement.html()
                     .replace(/<br\s*\/?>/gi, '\n')
-                    .replace(/<\/p>\s*<p>/gi, '\n\n');
+                    .replace(/<\/p>\s*<p>/gi, '\n\n')
+                    .replace(/ /g, ' ')
+                    .replace(/&/g, '&')
+                    .replace(/</g, '<')
+                    .replace(/>/g, '>');
+
                 const tempDiv = document.createElement('div');
                 tempDiv.innerHTML = renderedText;
-                renderedText = tempDiv.textContent;
+                renderedText = tempDiv.textContent.trim();
 
-                console.log(`[Telegram Bridge] Захвачен финальный текст, отправка обновления для chatId: ${lastProcessedChatId}`);
+                console.log(`[Telegram Bridge] Captured final text, sending update for chatId: ${lastProcessedChatId}`);
 
                 if (isStreamingMode) {
                     ws.send(JSON.stringify({
                         type: 'final_message_update',
                         chatId: lastProcessedChatId,
                         text: renderedText,
-                        enableTranslation: getSettings().enableTranslation,
-                        language: getSettings().language || 'ru'
+                        translate: getSettings().enableTranslation
                     }));
                     isStreamingMode = false;
                 } else {
@@ -563,8 +508,7 @@ function handleFinalMessage(lastMessageIdInChatArray) {
                         type: 'ai_reply',
                         chatId: lastProcessedChatId,
                         text: renderedText,
-                        enableTranslation: getSettings().enableTranslation,
-                        language: getSettings().language || 'ru'
+                        translate: getSettings().enableTranslation
                     }));
                 }
 

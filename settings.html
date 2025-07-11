@@ -37,32 +37,23 @@
         }
         return gk_fileData[filename] || "";
         }
-        </script><!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>Настройки Telegram Connector</title>
-</head>
-<body>
-    <div>
-        <h3>Настройки Telegram Connector</h3>
-        <div>
-            <label for="telegram_bridge_url">URL WebSocket сервера Bridge</label>
-            <input type="text" id="telegram_bridge_url" placeholder="ws://127.0.0.1:2333">
-            <div id="telegram_connection_status">Статус: Нажмите кнопку подключения</div>
-        </div>
-        <div>
-            <button id="telegram_connect_button">Подключиться</button>
-            <button id="telegram_disconnect_button">Отключиться</button>
-        </div>
-        <div>
-            <input type="checkbox" id="telegram_auto_connect">
-            <label for="telegram_auto_connect">Автоматическое подключение при загрузке страницы</label>
-        </div>
-        <div>
-            <input type="checkbox" id="telegram_enable_translation" checked>
-            <label for="telegram_enable_translation">Включить перевод сообщений</label>
-        </div>
+        </script><div class="extension_settings_container">
+    <h4>Telegram Connector settings</h4>
+    <div class="extension_input_group">
+        <label for="telegram_bridge_url">URL WebSocket сервера Bridge</label>
+        <input id="telegram_bridge_url" type="text" placeholder="ws://127.0.0.1:2333">
+        <p id="telegram_connection_status">Status: Press the connect button</p>
     </div>
-</body>
-</html>
+    <div class="extension_input_group">
+        <button id="telegram_connect_button">connect</button>
+        <button id="telegram_disconnect_button">disconnect</button>
+    </div>
+    <div class="extension_input_group">
+        <label for="telegram_auto_connect_checkbox">Autologin</label>
+        <input id="telegram_auto_connect_checkbox" type="checkbox">
+    </div>
+    <div class="extension_input_group">
+        <label for="telegram_enable_translation">Translate to RU</label>
+        <input id="telegram_enable_translation" type="checkbox">
+    </div>
+</div>
