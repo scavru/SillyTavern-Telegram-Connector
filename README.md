@@ -25,10 +25,9 @@ SillyTavern Telegram Connector — это расширение для SillyTaver
 
 1. В SillyTavern перейдите на вкладку "Extensions".
 2. Нажмите "Install Extension".
-3. Введите следующий URL: `https://github.com/qiqi20020612/SillyTavern-Telegram-Connector`.
+3. Введите следующий URL: `https://github.com/scavru/SillyTavern-Telegram-Connector`.
 4. Нажмите кнопку "Install".
 5. После установки перезапустите SillyTavern.
-6. зайдите в SillyTavern\data\default-user\extensions\ и переименуйте папку SillyTavern-Telegram-Connector-ru в SillyTavern-Telegram-Connector
 
 ### Настройка сервера
 
