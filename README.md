@@ -36,7 +36,7 @@ SillyTavern Telegram Connector — это расширение для SillyTaver
 3. запустите cmd
 4. Установите зависимости:
    ```
-   npm install node-telegram-bot-api ws
+   npm install node-telegram-bot-api ws axios
    ```
 5. Скопируйте файл `config.example.js` в `config.js`:
    ```
